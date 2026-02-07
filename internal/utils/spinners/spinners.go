@@ -10,6 +10,14 @@ import (
 	"github.com/theckman/yacspin"
 )
 
+// newSpinner is used by CreateSpinner; may be overridden in tests to simulate failure.
+var newSpinner = func(cfg yacspin.Config) (*yacspin.Spinner, error) {
+	return yacspin.New(cfg)
+}
+
+// exitOnError is called when spinner creation fails; tests may override to avoid os.Exit(1).
+var exitOnError = func(code int) { os.Exit(code) }
+
 // CreateSpinner initializes and returns a yacspin spinner with the provided
 // start and stop messages, characters, and failure configurations.
 func CreateSpinner(startMessage, stopCharacter, stopMessage, stopFailCharacter, stopFailMessage string) *yacspin.Spinner {
@@ -28,10 +36,11 @@ func CreateSpinner(startMessage, stopCharacter, stopMessage, stopFailCharacter, 
 		StopFailMessage:   stopFailMessage,
 	}
 
-	s, err := yacspin.New(cfg)
+	s, err := newSpinner(cfg)
 	if err != nil {
 		fmt.Printf("failed to create spinner: %v\n", err)
-		os.Exit(1)
+		exitOnError(1)
+		return nil
 	}
 
 	return s
@@ -52,6 +61,6 @@ func stopOnSignal(spinner *yacspin.Spinner) {
 		// ignoring error intentionally
 		_ = spinner.StopFail()
 
-		os.Exit(0)
+		exitOnError(0)
 	}()
 }

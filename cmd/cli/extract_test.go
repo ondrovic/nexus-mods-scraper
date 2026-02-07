@@ -171,7 +171,7 @@ func TestExtractCookies_Success(t *testing.T) {
 	// Act: Call ExtractCookies using the mockStoreProvider
 	cmd := &cobra.Command{}
 	args := []string{}
-	err := ExtractCookies(cmd, args, mockStoreProvider)
+	err := ExtractCookies(cmd, args, mockStoreProvider, nil)
 
 	// Assert: Verify no error and that all expectations on the mocks are met
 	assert.NoError(t, err)
@@ -234,7 +234,7 @@ func TestExtractCookies_ErrorInCookieExtractor(t *testing.T) {
 	// Act: Call ExtractCookies using the mockStoreProvider
 	cmd := &cobra.Command{}
 	args := []string{}
-	err := ExtractCookies(cmd, args, mockStoreProvider)
+	err := ExtractCookies(cmd, args, mockStoreProvider, nil)
 
 	// Assert: Verify the "no installed browsers with browser profiles found" error is returned
 	assert.Error(t, err)
@@ -266,7 +266,7 @@ func TestExtractCookies_NoCookieStores(t *testing.T) {
 	// Act
 	cmd := &cobra.Command{}
 	args := []string{}
-	err := ExtractCookies(cmd, args, mockStoreProvider)
+	err := ExtractCookies(cmd, args, mockStoreProvider, nil)
 
 	// Assert
 	assert.Error(t, err)
@@ -314,7 +314,7 @@ func TestExtractCookies_SaveError(t *testing.T) {
 	// Act
 	cmd := &cobra.Command{}
 	args := []string{}
-	err := ExtractCookies(cmd, args, mockStoreProvider)
+	err := ExtractCookies(cmd, args, mockStoreProvider, nil)
 
 	// Assert - should fail on save (error must originate from save step, not extraction/validation)
 	assert.Error(t, err)
@@ -394,7 +394,7 @@ func TestExtractCookies_WithValidationSuccess(t *testing.T) {
 	}()
 
 	cmd := &cobra.Command{}
-	err := ExtractCookies(cmd, []string{}, mockStoreProvider)
+	err := ExtractCookies(cmd, []string{}, mockStoreProvider, nil)
 
 	assert.NoError(t, err)
 	mockStore.AssertExpectations(t)
@@ -441,7 +441,7 @@ func TestExtractCookies_ValidationFailure_NonInteractive(t *testing.T) {
 	}()
 
 	cmd := &cobra.Command{}
-	err := ExtractCookies(cmd, []string{}, mockStoreProvider)
+	err := ExtractCookies(cmd, []string{}, mockStoreProvider, nil)
 
 	// Non-interactive: validation failure is only logged; we still try to save and succeed
 	assert.NoError(t, err)
@@ -503,7 +503,7 @@ func TestExtractCookies_ValidationSuccess_NoUsername(t *testing.T) {
 	}()
 
 	cmd := &cobra.Command{}
-	err := ExtractCookies(cmd, []string{}, mockStoreProvider)
+	err := ExtractCookies(cmd, []string{}, mockStoreProvider, nil)
 
 	assert.NoError(t, err)
 	mockStore.AssertExpectations(t)
@@ -511,4 +511,179 @@ func TestExtractCookies_ValidationSuccess_NoUsername(t *testing.T) {
 	content, err := os.ReadFile(path)
 	assert.NoError(t, err)
 	assert.Contains(t, string(content), "abc")
+}
+
+func TestExtractCookies_Interactive_Manual(t *testing.T) {
+	tempDir := t.TempDir()
+	origInteractive := viper.Get("interactive")
+	origNoValidate := viper.Get("no-validate")
+	origValidCookieNames := viper.Get("valid-cookie-names")
+	origOutputDir := options.OutputDirectory
+	viper.Set("interactive", true)
+	viper.Set("no-validate", true)
+	viper.Set("valid-cookie-names", []string{"session"})
+	options.OutputDirectory = tempDir
+	outputFilename = "session-cookies.json"
+	defer func() {
+		viper.Set("interactive", origInteractive)
+		viper.Set("no-validate", origNoValidate)
+		viper.Set("valid-cookie-names", origValidCookieNames)
+		options.OutputDirectory = origOutputDir
+	}()
+
+	behavior := &ExtractBehavior{
+		SelectMethod: func() (string, error) { return "manual", nil },
+		InteractiveInput: func(names []string) (map[string]string, error) {
+			m := make(map[string]string)
+			for _, n := range names {
+				m[n] = "manual-value"
+			}
+			return m, nil
+		},
+	}
+	mockStoreProvider := func() []kooky.CookieStore { return nil }
+
+	cmd := &cobra.Command{}
+	err := ExtractCookies(cmd, nil, mockStoreProvider, behavior)
+
+	assert.NoError(t, err)
+	path := filepath.Join(tempDir, "session-cookies.json")
+	content, err := os.ReadFile(path)
+	assert.NoError(t, err)
+	assert.Contains(t, string(content), "manual-value")
+}
+
+func TestExtractCookies_Interactive_AutoSuccess(t *testing.T) {
+	mockStore := new(MockCookieStore)
+	cookie := &kooky.Cookie{
+		Cookie:   http.Cookie{Name: "session", Value: "auto-value", Domain: "example.com"},
+		Creation: time.Now(),
+		Container: "MockBrowser",
+	}
+	mockStore.mockCookies = []*kooky.Cookie{cookie}
+	mockStore.On("Browser").Return("MockBrowser")
+	mockStore.On("Close").Return(nil)
+	mockStoreProvider := func() []kooky.CookieStore { return []kooky.CookieStore{mockStore} }
+
+	tempDir := t.TempDir()
+	originalInteractive := viper.Get("interactive")
+	originalNoValidate := viper.Get("no-validate")
+	originalValidNames := viper.Get("valid-cookie-names")
+	originalOutputDir := options.OutputDirectory
+	originalOutputFilename := outputFilename
+	viper.Set("interactive", true)
+	viper.Set("no-validate", true)
+	viper.Set("valid-cookie-names", []string{"session"})
+	options.OutputDirectory = tempDir
+	outputFilename = "session-cookies.json"
+	defer func() {
+		viper.Set("interactive", originalInteractive)
+		viper.Set("no-validate", originalNoValidate)
+		viper.Set("valid-cookie-names", originalValidNames)
+		options.OutputDirectory = originalOutputDir
+		outputFilename = originalOutputFilename
+	}()
+
+	behavior := &ExtractBehavior{
+		SelectMethod: func() (string, error) { return "auto", nil },
+	}
+	cmd := &cobra.Command{}
+	err := ExtractCookies(cmd, nil, mockStoreProvider, behavior)
+
+	assert.NoError(t, err)
+	content, err := os.ReadFile(filepath.Join(tempDir, "session-cookies.json"))
+	assert.NoError(t, err)
+	assert.Contains(t, string(content), "auto-value")
+}
+
+func TestExtractCookies_Interactive_AutoFailThenManual(t *testing.T) {
+	mockStoreProvider := func() []kooky.CookieStore { return []kooky.CookieStore{} }
+	tempDir := t.TempDir()
+	originalInteractive := viper.Get("interactive")
+	originalNoValidate := viper.Get("no-validate")
+	originalValidNames := viper.Get("valid-cookie-names")
+	originalOutputDir := options.OutputDirectory
+	originalOutputFilename := outputFilename
+	viper.Set("interactive", true)
+	viper.Set("no-validate", true)
+	viper.Set("valid-cookie-names", []string{"session"})
+	options.OutputDirectory = tempDir
+	outputFilename = "session-cookies.json"
+	defer func() {
+		viper.Set("interactive", originalInteractive)
+		viper.Set("no-validate", originalNoValidate)
+		viper.Set("valid-cookie-names", originalValidNames)
+		options.OutputDirectory = originalOutputDir
+		outputFilename = originalOutputFilename
+	}()
+
+	confirmCalled := false
+	behavior := &ExtractBehavior{
+		SelectMethod: func() (string, error) { return "auto", nil },
+		ConfirmAction: func(prompt string) bool {
+			confirmCalled = true
+			return true
+		},
+		InteractiveInput: func(names []string) (map[string]string, error) {
+			m := make(map[string]string)
+			for _, n := range names {
+				m[n] = "fallback-value"
+			}
+			return m, nil
+		},
+	}
+	cmd := &cobra.Command{}
+	err := ExtractCookies(cmd, nil, mockStoreProvider, behavior)
+
+	assert.NoError(t, err)
+	assert.True(t, confirmCalled)
+	content, err := os.ReadFile(filepath.Join(tempDir, "session-cookies.json"))
+	assert.NoError(t, err)
+	assert.Contains(t, string(content), "fallback-value")
+}
+
+func TestExtractCookies_Interactive_AutoFailDeclineManual(t *testing.T) {
+	mockStoreProvider := func() []kooky.CookieStore { return []kooky.CookieStore{} }
+	originalInteractive := viper.Get("interactive")
+	originalNoValidate := viper.Get("no-validate")
+	originalValidNames := viper.Get("valid-cookie-names")
+	viper.Set("interactive", true)
+	viper.Set("no-validate", true)
+	viper.Set("valid-cookie-names", []string{"session"})
+	defer func() {
+		viper.Set("interactive", originalInteractive)
+		viper.Set("no-validate", originalNoValidate)
+		viper.Set("valid-cookie-names", originalValidNames)
+	}()
+
+	behavior := &ExtractBehavior{
+		SelectMethod:  func() (string, error) { return "auto", nil },
+		ConfirmAction: func(prompt string) bool { return false },
+	}
+	cmd := &cobra.Command{}
+	err := ExtractCookies(cmd, nil, mockStoreProvider, behavior)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no cookie stores found")
+}
+
+func TestExtractCookies_Interactive_SelectMethodError(t *testing.T) {
+	originalInteractive := viper.Get("interactive")
+	originalNoValidate := viper.Get("no-validate")
+	originalValidNames := viper.Get("valid-cookie-names")
+	viper.Set("interactive", true)
+	defer func() {
+		viper.Set("interactive", originalInteractive)
+		viper.Set("no-validate", originalNoValidate)
+		viper.Set("valid-cookie-names", originalValidNames)
+	}()
+
+	behavior := &ExtractBehavior{
+		SelectMethod: func() (string, error) { return "", errors.New("select error") },
+	}
+	cmd := &cobra.Command{}
+	err := ExtractCookies(cmd, nil, func() []kooky.CookieStore { return nil }, behavior)
+
+	assert.Error(t, err)
+	assert.Equal(t, "select error", err.Error())
 }

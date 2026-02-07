@@ -5,11 +5,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/ondrovic/nexus-mods-scraper/internal/types"
+	"github.com/ondrovic/nexus-mods-scraper/internal/utils/spinners"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -129,6 +131,44 @@ func TestRun_InvalidModID(t *testing.T) {
 
 	// Optionally, you can also assert the `DisplayResults` is set to true
 	assert.True(t, viper.GetBool("display-results"))
+}
+
+// TestRun_Success covers the path in run() that builds CliFlags from viper and args
+// and calls scrapeMod (lines 85-98). It uses mocked fetch functions so no real I/O occurs.
+func TestRun_Success(t *testing.T) {
+	tempDir := t.TempDir()
+	cookieFile := filepath.Join(tempDir, "session-cookies.json")
+	require.NoError(t, os.WriteFile(cookieFile, []byte("{}"), 0644))
+	outputDir := filepath.Join(tempDir, "output")
+	require.NoError(t, os.Mkdir(outputDir, 0755))
+
+	// run() reads config from viper; set values so scrapeMod can succeed
+	viper.Set("base-url", "https://example.com")
+	viper.Set("cookie-directory", tempDir)
+	viper.Set("cookie-filename", "session-cookies.json")
+	viper.Set("display-results", true)
+	viper.Set("save-results", false)
+	viper.Set("quiet", true)
+	viper.Set("output-directory", outputDir)
+	viper.Set("valid-cookie-names", []string{"nexusmods_session", "nexusmods_session_refresh"})
+
+	// Stub package-level fetch functions so scrapeMod does not perform real I/O
+	origFetchModInfo := fetchModInfoFunc
+	origFetchDocument := fetchDocumentFunc
+	fetchModInfoFunc = mockFetchModInfoConcurrent
+	fetchDocumentFunc = mockFetchDocument
+	defer func() {
+		fetchModInfoFunc = origFetchModInfo
+		fetchDocumentFunc = origFetchDocument
+	}()
+
+	mockCmd := &cobra.Command{Use: "scrape", RunE: run}
+	initScrapeFlags(mockCmd)
+	mockCmd.SetArgs([]string{"some-game", "42", "--display-results"})
+
+	err := mockCmd.Execute()
+
+	assert.NoError(t, err)
 }
 
 func TestScrapeMod_WithMockedFunctions(t *testing.T) {
@@ -390,6 +430,38 @@ func TestScrapeMod_DisplayResults_FormatError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestScrapeMod_SaveResults_SaveFails_NonQuiet(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-based read-only dir is unreliable on Windows")
+	}
+	// SaveResults true, Quiet false: output dir is read-only so SaveModInfoToJson fails,
+	// covering saveSpinner.StopFailMessage and saveSpinner.StopFail().
+	tempDir := t.TempDir()
+	cookieFile := filepath.Join(tempDir, "session-cookies.json")
+	require.NoError(t, os.WriteFile(cookieFile, []byte("{}"), 0644))
+	outputDir := filepath.Join(tempDir, "output")
+	require.NoError(t, os.MkdirAll(outputDir, 0755))
+	// Make read-only so writing the JSON file fails
+	require.NoError(t, os.Chmod(outputDir, 0o444))
+	defer os.Chmod(outputDir, 0o755) // allow cleanup
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  false,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     true,
+		OutputDirectory: outputDir,
+	}
+
+	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+
+	assert.Error(t, err)
+}
+
 func TestScrapeMod_SaveResults_EnsureDirExistsFails(t *testing.T) {
 	// OutputDirectory under a non-directory path so EnsureDirExists fails (covers that error return)
 	tempDir := t.TempDir()
@@ -411,4 +483,75 @@ func TestScrapeMod_SaveResults_EnsureDirExistsFails(t *testing.T) {
 	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
 
 	assert.Error(t, err)
+}
+
+// failingSpinner is a spinnerI that fails on Start() for testing.
+type failingSpinner struct{}
+
+func (failingSpinner) Start() error                          { return assert.AnError }
+func (failingSpinner) Stop() error                           { return nil }
+func (failingSpinner) StopFail() error                       { return nil }
+func (failingSpinner) StopFailMessage(string)                {}
+func (failingSpinner) StopMessage(string)                    {}
+
+func TestScrapeMod_SpinnerStartFails(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
+
+	old := createSpinner
+	createSpinner = func(_, _, _, _, _ string) spinnerI { return failingSpinner{} }
+	defer func() { createSpinner = old }()
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  false,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     false,
+	}
+
+	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to start spinner")
+}
+
+// spinnerThatFailsOnSecondCall returns a real spinner on the first call (HTTP setup), then a failing spinner (scrape).
+func spinnerThatFailsOnSecondCall() func(_, _, _, _, _ string) spinnerI {
+	n := 0
+	return func(_, _, _, _, _ string) spinnerI {
+		n++
+		if n == 2 {
+			return failingSpinner{} // second spinner (scrape) fails
+		}
+		return spinners.CreateSpinner("", "✓", "", "✗", "")
+	}
+}
+
+func TestScrapeMod_ScrapeSpinnerStartFails(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
+
+	old := createSpinner
+	createSpinner = spinnerThatFailsOnSecondCall() // HTTP spinner succeeds, scrape spinner fails
+	defer func() { createSpinner = old }()
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  false,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     false,
+	}
+
+	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to start spinner")
 }

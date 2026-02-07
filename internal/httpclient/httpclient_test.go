@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // Mocker is a mock implementation of the HTTPClient interface for testing.
@@ -163,4 +164,89 @@ func TestInitClient_InvalidDomain(t *testing.T) {
 	err = InitClient("://invalid-domain", dir, filename)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "parsing domain")
+}
+
+// TestInitClient_DomainWithoutScheme covers setCookiesFromFile when domain has no scheme
+// (e.g. "example.com"); the code adds "https://" and parses again.
+func TestInitClient_DomainWithoutScheme(t *testing.T) {
+	defer func() { Client = nil }()
+
+	dir := t.TempDir()
+	filename := "cookies.json"
+	cookiePath := filepath.Join(dir, filename)
+	require.NoError(t, os.WriteFile(cookiePath, []byte(`{"session":"abc"}`), 0644))
+
+	err := InitClient("example.com", dir, filename)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, Client)
+}
+
+// TestSetCookiesFromFile_InvalidDomainEmptyHostname covers the error path when the domain
+// parses but hostname is still empty after prepending "https://".
+func TestSetCookiesFromFile_InvalidDomainEmptyHostname(t *testing.T) {
+	dir := t.TempDir()
+	filename := "cookies.json"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, filename), []byte(`{"s":"v"}`), 0644))
+
+	// InitClient creates a real *http.Client with *cookiejar.Jar, then calls setCookiesFromFile.
+	// Use a domain that parses but yields empty hostname even after "https://" + domain.
+	// url.Parse("///") has Host/hostname empty; "https://" + "///" = "https://///" also has empty host.
+	err := InitClient("///", dir, filename)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid domain for cookies")
+	assert.Contains(t, err.Error(), "could not extract hostname")
+}
+
+// TestSetCookiesFromFile_ClientNotHTTPClient covers the error when Client is not *http.Client.
+func TestSetCookiesFromFile_ClientNotHTTPClient(t *testing.T) {
+	dir := t.TempDir()
+	filename := "cookies.json"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, filename), []byte(`{"s":"v"}`), 0644))
+
+	Client = &Mocker{}
+	defer func() {
+		Client = nil
+	}()
+
+	err := setCookiesFromFile("https://example.com", dir, filename)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "client is not *http.Client")
+}
+
+// TestSetCookiesFromFile_JarNil covers the error when the client's Jar is nil.
+func TestSetCookiesFromFile_JarNil(t *testing.T) {
+	dir := t.TempDir()
+	filename := "cookies.json"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, filename), []byte(`{"s":"v"}`), 0644))
+
+	Client = &http.Client{Jar: nil}
+	defer func() {
+		Client = nil
+	}()
+
+	err := setCookiesFromFile("https://example.com", dir, filename)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "cookie jar is nil")
+}
+
+// TestSetCookiesFromFile_JarNotCookieJar covers the error when Jar is not *cookiejar.Jar.
+func TestSetCookiesFromFile_JarNotCookieJar(t *testing.T) {
+	dir := t.TempDir()
+	filename := "cookies.json"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, filename), []byte(`{"s":"v"}`), 0644))
+
+	mockJar := new(Mocker)
+	Client = &http.Client{Jar: mockJar}
+	defer func() {
+		Client = nil
+	}()
+
+	err := setCookiesFromFile("https://example.com", dir, filename)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "cookie jar is not *cookiejar.Jar")
 }

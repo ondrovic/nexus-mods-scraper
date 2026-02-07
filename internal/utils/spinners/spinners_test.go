@@ -1,13 +1,16 @@
 package spinners
 
 import (
+	"errors"
 	"os"
-
+	"os/exec"
 	"os/signal"
+	"testing"
 	"time"
 
-	"testing"
+	"github.com/theckman/yacspin"
 )
+
 
 func TestCreateSpinner_StartAndStop(t *testing.T) {
 	// Arrange
@@ -106,5 +109,58 @@ func TestCreateSpinner_StopMessage(t *testing.T) {
 	// Assert
 	if err != nil {
 		t.Errorf("Expected spinner to stop successfully, but got error: %v", err)
+	}
+}
+
+// TestCreateSpinner_CreationError covers the error path when spinner creation fails.
+func TestCreateSpinner_CreationError(t *testing.T) {
+	oldNewSpinner := newSpinner
+	oldExitOnError := exitOnError
+	defer func() {
+		newSpinner = oldNewSpinner
+		exitOnError = oldExitOnError
+	}()
+
+	newSpinner = func(_ yacspin.Config) (*yacspin.Spinner, error) {
+		return nil, errors.New("injected spinner failure")
+	}
+	exitOnError = func(code int) {
+		if code != 1 {
+			t.Errorf("expected exit code 1, got %d", code)
+		}
+		panic("exitOnError")
+	}
+
+	defer func() {
+		if v := recover(); v != "exitOnError" {
+			t.Errorf("expected panic exitOnError, got %v", v)
+		}
+	}()
+
+	CreateSpinner("a", "b", "c", "d", "e")
+	t.Fatal("CreateSpinner should have panicked")
+}
+
+// TestCreateSpinner_ExitsOnCreationError runs CreateSpinner in a subprocess with
+// an injected spinner creation failure and verifies the process exits with code 1.
+func TestCreateSpinner_ExitsOnCreationError(t *testing.T) {
+	if os.Getenv("GO_TEST_SPINNER_FAIL") == "1" {
+		newSpinner = func(_ yacspin.Config) (*yacspin.Spinner, error) {
+			return nil, errors.New("injected spinner failure")
+		}
+		CreateSpinner("a", "b", "c", "d", "e")
+		t.Fatal("CreateSpinner should have exited")
+	}
+	cmd := exec.Command("go", "test", "-run", "^TestCreateSpinner_ExitsOnCreationError$", "./internal/utils/spinners/", "-v", "-count=1")
+	cmd.Env = append(os.Environ(), "GO_TEST_SPINNER_FAIL=1")
+	err := cmd.Run()
+	if err == nil {
+		t.Fatal("expected subprocess to exit with non-zero status")
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() != 1 {
+		t.Errorf("expected exit code 1, got: %d", ee.ExitCode())
+	} else if !errors.As(err, &ee) {
+		t.Errorf("expected exit error, got: %v", err)
 	}
 }

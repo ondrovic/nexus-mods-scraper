@@ -23,11 +23,24 @@ import (
 	"strings"
 )
 
+// spinnerI is the subset of spinner operations used by scrapeMod; tests may inject a mock.
+type spinnerI interface {
+	Start() error
+	Stop() error
+	StopFail() error
+	StopFailMessage(string)
+	StopMessage(string)
+}
+
 var (
 	// options holds the command-line flag values using the CliFlags struct.
 	options = types.CliFlags{}
 	// scrapeCmd is a Cobra command used for scraping operations in the application.
 	scrapeCmd = &cobra.Command{}
+	// createSpinner creates a spinner; tests may override to simulate Start() failure.
+	createSpinner = func(start, stopCh, stopMsg, failCh, failMsg string) spinnerI {
+		return spinners.CreateSpinner(start, stopCh, stopMsg, failCh, failMsg)
+	}
 	// fetchModInfoFunc is a variable that holds a reference to the function used for
 	// concurrently fetching mod information.
 	fetchModInfoFunc = fetchers.FetchModInfoConcurrent
@@ -110,17 +123,21 @@ func scrapeMod(
 ) error {
 	// HTTP Client Setup
 	if !sc.Quiet {
-		httpSpinner := spinners.CreateSpinner("Setting up HTTP client", "✓", "HTTP client setup complete", "✗", "HTTP client setup failed")
+		httpSpinner := createSpinner("Setting up HTTP client", "✓", "HTTP client setup complete", "✗", "HTTP client setup failed")
 		if err := httpSpinner.Start(); err != nil {
 			return fmt.Errorf("failed to start spinner: %w", err)
 		}
 
 		if err := httpclient.InitClient(sc.BaseUrl, sc.CookieDirectory, sc.CookieFile); err != nil {
 			httpSpinner.StopFailMessage(fmt.Sprintf("Error setting up HTTP client: %v", err))
-			httpSpinner.StopFail()
+			if stopErr := httpSpinner.StopFail(); stopErr != nil {
+				fmt.Fprintf(os.Stderr, "spinner stop error: %v\n", stopErr)
+			}
 			return err
 		}
-		httpSpinner.Stop()
+		if stopErr := httpSpinner.Stop(); stopErr != nil {
+			fmt.Fprintf(os.Stderr, "spinner stop error: %v\n", stopErr)
+		}
 	} else {
 		if err := httpclient.InitClient(sc.BaseUrl, sc.CookieDirectory, sc.CookieFile); err != nil {
 			return err
@@ -131,7 +148,7 @@ func scrapeMod(
 	var results types.Results
 	var err error
 	if !sc.Quiet {
-		scrapeSpinner := spinners.CreateSpinner(fmt.Sprintf("Scraping modID: %d for game: %s", sc.ModID, sc.GameName), "✓", "Mod scraping complete", "✗", "Mod scraping failed")
+		scrapeSpinner := createSpinner(fmt.Sprintf("Scraping modID: %d for game: %s", sc.ModID, sc.GameName), "✓", "Mod scraping complete", "✗", "Mod scraping failed")
 		if err := scrapeSpinner.Start(); err != nil {
 			return fmt.Errorf("failed to start spinner: %w", err)
 		}
@@ -139,10 +156,14 @@ func scrapeMod(
 		results, err = fetchModInfoFunc(sc.BaseUrl, sc.GameName, sc.ModID, utils.ConcurrentFetch, fetchDocumentFunc)
 		if err != nil {
 			scrapeSpinner.StopFailMessage(fmt.Sprintf("Error scraping mod: %v", err))
-			scrapeSpinner.StopFail()
+			if stopErr := scrapeSpinner.StopFail(); stopErr != nil {
+				fmt.Fprintf(os.Stderr, "spinner stop error: %v\n", stopErr)
+			}
 			return err
 		}
-		scrapeSpinner.Stop()
+		if stopErr := scrapeSpinner.Stop(); stopErr != nil {
+			fmt.Fprintf(os.Stderr, "spinner stop error: %v\n", stopErr)
+		}
 	} else {
 		results, err = fetchModInfoFunc(sc.BaseUrl, sc.GameName, sc.ModID, utils.ConcurrentFetch, fetchDocumentFunc)
 		if err != nil {
@@ -153,17 +174,21 @@ func scrapeMod(
 	// Display Results
 	if sc.DisplayResults {
 		if !sc.Quiet {
-			displaySpinner := spinners.CreateSpinner("Displaying results", "✓", "Results displayed", "✗", "Failed to display results")
+			displaySpinner := createSpinner("Displaying results", "✓", "Results displayed", "✗", "Failed to display results")
 			if err := displaySpinner.Start(); err != nil {
 				return fmt.Errorf("failed to start display spinner: %w", err)
 			}
 			if err := exporters.DisplayResults(sc, results, formatResultsFunc); err != nil {
 				fmt.Fprintln(os.Stderr, "Error displaying results:", err)
 				displaySpinner.StopFailMessage("Failed to display results")
-				displaySpinner.StopFail()
+				if stopErr := displaySpinner.StopFail(); stopErr != nil {
+					fmt.Fprintf(os.Stderr, "spinner stop error: %v\n", stopErr)
+				}
 				return err
 			}
-			displaySpinner.Stop()
+			if stopErr := displaySpinner.Stop(); stopErr != nil {
+				fmt.Fprintf(os.Stderr, "spinner stop error: %v\n", stopErr)
+			}
 		} else {
 			if err := exporters.DisplayResults(sc, results, formatResultsFunc); err != nil {
 				fmt.Fprintln(os.Stderr, "Error displaying results:", err)
@@ -181,19 +206,23 @@ func scrapeMod(
 
 		outputFilename := fmt.Sprintf("%s %d", strings.ToLower(results.Mods.Name), results.Mods.ModID)
 		if !sc.Quiet {
-			saveSpinner := spinners.CreateSpinner("Saving results", "✓", "Results saved successfully", "✗", "Failed to save results")
+			saveSpinner := createSpinner("Saving results", "✓", "Results saved successfully", "✗", "Failed to save results")
 			if err := saveSpinner.Start(); err != nil {
 				return fmt.Errorf("failed to start save spinner: %w", err)
 			}
 
 			if item, err := exporters.SaveModInfoToJson(sc, results, outputGameDirectory, outputFilename, utils.EnsureDirExists); err != nil {
 				saveSpinner.StopFailMessage(fmt.Sprintf("Error saving results: %v", err))
-				saveSpinner.StopFail()
+				if stopErr := saveSpinner.StopFail(); stopErr != nil {
+					fmt.Fprintf(os.Stderr, "spinner stop error: %v\n", stopErr)
+				}
 				return err
 			} else {
 				saveSpinner.StopMessage(fmt.Sprintf("Saved successfully to %s", termlink.ColorLink(item, item, "green")))
 			}
-			saveSpinner.Stop()
+			if stopErr := saveSpinner.Stop(); stopErr != nil {
+				fmt.Fprintf(os.Stderr, "spinner stop error: %v\n", stopErr)
+			}
 		} else {
 			if _, err := exporters.SaveModInfoToJson(sc, results, outputGameDirectory, outputFilename, utils.EnsureDirExists); err != nil {
 				return err

@@ -2,13 +2,17 @@ package extractors
 
 import (
 	"context"
+	"database/sql"
 	"iter"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/ondrovic/nexus-mods-scraper/internal/types"
@@ -16,6 +20,7 @@ import (
 	"github.com/browserutils/kooky"
 	_ "github.com/browserutils/kooky/browser/all"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -650,6 +655,14 @@ func TestExtractCleanTextExcludingElementText_NoExclude(t *testing.T) {
 	assert.Equal(t, "Hello World", result)
 }
 
+func TestExtractCleanTextExcludingElementText_SelectorNotFound(t *testing.T) {
+	html := `<div class="other">Hello World</div>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := extractCleanTextExcludingElementText(doc, ".nonexistent", "span")
+	assert.Equal(t, "", result)
+}
+
 // Tests for cookie_validator.go extractUsername function
 
 func TestExtractUsername_FromProfileMenu(t *testing.T) {
@@ -751,6 +764,178 @@ func TestCopyToTemp_SourceNotFound(t *testing.T) {
 	tempPath, err := copyToTemp("/nonexistent/path/to/file.db")
 	assert.Error(t, err)
 	assert.Empty(t, tempPath)
+}
+
+func TestCopyToTemp_SourceIsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	tempPath, err := copyToTemp(dir)
+	assert.Error(t, err)
+	assert.Empty(t, tempPath)
+}
+
+// createChromiumCookieDB creates a minimal SQLite DB with Chromium cookies table and one row.
+func createChromiumCookieDB(t *testing.T, path, name, value, host string, expiresUnix int64) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE cookies (name TEXT, value TEXT, host_key TEXT, expires_utc INTEGER)`)
+	require.NoError(t, err)
+	// Chromium: expires_utc = (unixSeconds + 11644473600) * 1000000
+	expiresUtc := (expiresUnix + 11644473600) * 1000000
+	_, err = db.Exec(`INSERT INTO cookies (name, value, host_key, expires_utc) VALUES (?, ?, ?, ?)`, name, value, host, expiresUtc)
+	require.NoError(t, err)
+}
+
+// createFirefoxCookieDB creates a minimal SQLite DB with Firefox moz_cookies table and one row.
+func createFirefoxCookieDB(t *testing.T, path, name, value, host string, expiryUnix int64) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE moz_cookies (name TEXT, value TEXT, host TEXT, expiry INTEGER)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO moz_cookies (name, value, host, expiry) VALUES (?, ?, ?, ?)`, name, value, host, expiryUnix)
+	require.NoError(t, err)
+}
+
+func TestReadCookiesFromDB_Chromium(t *testing.T) {
+	dir := t.TempDir()
+	cookiePath := filepath.Join(dir, "Cookies")
+	createChromiumCookieDB(t, cookiePath, "nexusmods_session", "test_value_123", "nexusmods.com", time.Now().Unix()+86400)
+
+	bp := browserPath{
+		Browser:    "chromium",
+		Profile:    "Default",
+		CookiePath: cookiePath,
+		IsChromium: true,
+	}
+	cookies, err := readCookiesFromDB(bp, "nexusmods", []string{"nexusmods_session"})
+	require.NoError(t, err)
+	require.Len(t, cookies, 1)
+	assert.Equal(t, "test_value_123", cookies["nexusmods_session"].Value)
+	assert.Equal(t, "nexusmods.com", cookies["nexusmods_session"].Domain)
+}
+
+func TestReadCookiesFromDB_Firefox(t *testing.T) {
+	dir := t.TempDir()
+	cookiePath := filepath.Join(dir, "cookies.sqlite")
+	createFirefoxCookieDB(t, cookiePath, "nexusmods_session", "firefox_value", "nexusmods.com", time.Now().Unix()+86400)
+
+	bp := browserPath{
+		Browser:    "firefox",
+		Profile:    "default",
+		CookiePath: cookiePath,
+		IsChromium: false,
+	}
+	cookies, err := readCookiesFromDB(bp, "nexusmods", []string{"nexusmods_session"})
+	require.NoError(t, err)
+	require.Len(t, cookies, 1)
+	assert.Equal(t, "firefox_value", cookies["nexusmods_session"].Value)
+}
+
+func TestReadCookiesFromDB_InvalidDB(t *testing.T) {
+	dir := t.TempDir()
+	invalidPath := filepath.Join(dir, "not-sqlite.db")
+	require.NoError(t, os.WriteFile(invalidPath, []byte("not a database"), 0644))
+
+	bp := browserPath{CookiePath: invalidPath, IsChromium: true}
+	cookies, err := readCookiesFromDB(bp, "example.com", []string{"session"})
+	assert.Error(t, err)
+	assert.Nil(t, cookies)
+}
+
+func TestReadCookiesFromDB_Chromium_ZeroExpiry(t *testing.T) {
+	dir := t.TempDir()
+	cookiePath := filepath.Join(dir, "Cookies")
+	db, err := sql.Open("sqlite", cookiePath)
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE cookies (name TEXT, value TEXT, host_key TEXT, expires_utc INTEGER)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO cookies (name, value, host_key, expires_utc) VALUES (?, ?, ?, ?)`, "s", "v", "example.com", 0)
+	require.NoError(t, err)
+	db.Close()
+
+	bp := browserPath{CookiePath: cookiePath, IsChromium: true}
+	cookies, err := readCookiesFromDB(bp, "example", []string{"s"})
+	require.NoError(t, err)
+	require.Len(t, cookies, 1)
+	assert.True(t, cookies["s"].Expires.IsZero(), "zero expiry should give zero time")
+}
+
+func TestReadCookiesFromDB_Firefox_ZeroExpiry(t *testing.T) {
+	dir := t.TempDir()
+	cookiePath := filepath.Join(dir, "cookies.sqlite")
+	db, err := sql.Open("sqlite", cookiePath)
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE moz_cookies (name TEXT, value TEXT, host TEXT, expiry INTEGER)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO moz_cookies (name, value, host, expiry) VALUES (?, ?, ?, ?)`, "s", "v", "example.com", 0)
+	require.NoError(t, err)
+	db.Close()
+
+	bp := browserPath{CookiePath: cookiePath, IsChromium: false}
+	cookies, err := readCookiesFromDB(bp, "example", []string{"s"})
+	require.NoError(t, err)
+	require.Len(t, cookies, 1)
+	assert.True(t, cookies["s"].Expires.IsZero())
+}
+
+func TestFindAdditionalBrowserCookies_WithTempHome(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, ".config", "chromium", "Default")
+	require.NoError(t, os.MkdirAll(configDir, 0755))
+	cookiePath := filepath.Join(configDir, "Cookies")
+	createChromiumCookieDB(t, cookiePath, "nexusmods_session", "additional_cookie_value", "nexusmods.com", time.Now().Unix()+86400)
+
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", home)
+	defer os.Setenv("HOME", oldHome)
+
+	stores := FindAdditionalBrowserCookies("nexusmods", []string{"nexusmods_session"})
+	require.NotEmpty(t, stores)
+	var found bool
+	for _, s := range stores {
+		if s.BrowserName == "chromium" && len(s.Cookies) > 0 {
+			if v, ok := s.Cookies["nexusmods_session"]; ok && v.Value == "additional_cookie_value" {
+				found = true
+				break
+			}
+		}
+	}
+	assert.True(t, found, "expected to find chromium store with nexusmods_session cookie")
+}
+
+// TestFindAdditionalBrowserCookies_ReadError covers the branch where a cookie file exists
+// but readCookiesFromDB fails (e.g. invalid SQLite); store is appended with Error set.
+func TestFindAdditionalBrowserCookies_ReadError(t *testing.T) {
+	home := t.TempDir()
+	// Valid chromium DB
+	chromiumDir := filepath.Join(home, ".config", "chromium", "Default")
+	require.NoError(t, os.MkdirAll(chromiumDir, 0755))
+	createChromiumCookieDB(t, filepath.Join(chromiumDir, "Cookies"), "session", "v1", "example.com", time.Now().Unix()+86400)
+	// Invalid cookie file (exists but not valid DB) so readCookiesFromDB fails
+	chromeDir := filepath.Join(home, ".config", "google-chrome", "Default")
+	require.NoError(t, os.MkdirAll(chromeDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(chromeDir, "Cookies"), []byte("not sqlite"), 0644))
+
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", home)
+	defer os.Setenv("HOME", oldHome)
+
+	stores := FindAdditionalBrowserCookies("example", []string{"session"})
+	require.NotEmpty(t, stores)
+	var withError, withCookies int
+	for _, s := range stores {
+		if s.Error != "" {
+			withError++
+		}
+		if len(s.Cookies) > 0 {
+			withCookies++
+		}
+	}
+	assert.GreaterOrEqual(t, withCookies, 1, "expected at least one store with cookies")
+	assert.GreaterOrEqual(t, withError, 1, "expected at least one store with error from invalid DB")
 }
 
 // Tests for browser_paths.go browserPath struct and related functions
