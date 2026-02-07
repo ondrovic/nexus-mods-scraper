@@ -149,6 +149,26 @@ func TestPrintPrettyJson(t *testing.T) {
 	}
 }
 
+// Test for PrintPrettyJson with alternate colors
+func TestPrintPrettyJson_AltColors(t *testing.T) {
+	data := `{"Name":"Test Mod","ID":12345}`
+
+	err := PrintPrettyJson(data, true)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// Test for PrintPrettyJson with invalid JSON
+func TestPrintPrettyJson_InvalidJSON(t *testing.T) {
+	data := `{invalid json}`
+
+	err := PrintPrettyJson(data)
+	if err == nil {
+		t.Error("expected error for invalid JSON, got nil")
+	}
+}
+
 // Test for RemoveHTTPPrefix
 func TestRemoveHTTPPrefix(t *testing.T) {
 	tests := []struct {

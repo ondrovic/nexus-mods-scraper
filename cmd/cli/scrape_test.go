@@ -84,10 +84,21 @@ func (m *Mocker) EnsureDirExists(dir string) error {
 }
 
 func TestRun_NoResultsFlagSet(t *testing.T) {
-	mockCmd := &cobra.Command{}
-	args := []string{"scrape", "game-name", "1234"}
+	// Create a new mock command
+	mockCmd := &cobra.Command{
+		Use:  "scrape",
+		RunE: run,
+	}
 
-	err := run(mockCmd, args)
+	// Initialize the scraper flags
+	initScrapeFlags(mockCmd)
+
+	// Set args with both display-results and save-results explicitly set to false
+	args := []string{"game-name", "1234", "--display-results=false", "--save-results=false"}
+	mockCmd.SetArgs(args)
+
+	// Execute the command
+	err := mockCmd.Execute()
 
 	// Assert the expected error
 	assert.EqualError(t, err, "at least one of --display-results (-r) or --save-results (-s) must be enabled")
@@ -151,4 +162,185 @@ func TestScrapeMod_WithMockedFunctions(t *testing.T) {
 
 	// Assert
 	assert.NoError(t, err)
+}
+
+func TestScrapeMod_QuietMode(t *testing.T) {
+	// Create a temporary directory for the test
+	tempDir := t.TempDir()
+
+	// Create a temporary session-cookies.json file
+	tempFilePath := filepath.Join(tempDir, "session-cookies.json")
+	err := os.WriteFile(tempFilePath, []byte("{}"), 0644)
+	require.NoError(t, err)
+
+	// Create a temporary directory for output
+	tempOutputDir := filepath.Join(tempDir, "output")
+	err = os.Mkdir(tempOutputDir, 0755)
+	require.NoError(t, err)
+
+	// Prepare test CliFlags with quiet mode enabled
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  true,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           true, // Enable quiet mode
+		SaveResults:     true,
+		OutputDirectory: tempOutputDir,
+	}
+
+	// Act
+	err = scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+
+	// Assert - should still work in quiet mode
+	assert.NoError(t, err)
+}
+
+func TestScrapeMod_DisplayOnly(t *testing.T) {
+	// Create a temporary directory for the test
+	tempDir := t.TempDir()
+
+	// Create a temporary session-cookies.json file
+	tempFilePath := filepath.Join(tempDir, "session-cookies.json")
+	err := os.WriteFile(tempFilePath, []byte("{}"), 0644)
+	require.NoError(t, err)
+
+	// Prepare test CliFlags with display only
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  true,
+		GameName:        "game",
+		ModID:           1234,
+		SaveResults:     false,
+	}
+
+	// Act
+	err = scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+
+	// Assert
+	assert.NoError(t, err)
+}
+
+func TestScrapeMod_FetchModInfoError_QuietMode(t *testing.T) {
+	// Create a temporary directory for the test
+	tempDir := t.TempDir()
+
+	// Create a temporary session-cookies.json file
+	tempFilePath := filepath.Join(tempDir, "session-cookies.json")
+	err := os.WriteFile(tempFilePath, []byte("{}"), 0644)
+	require.NoError(t, err)
+
+	// Mock function that returns an error
+	mockFetchModInfoError := func(baseUrl, game string, modId int64, concurrentFetch func(tasks ...func() error) error, fetchDocument func(targetURL string) (*goquery.Document, error)) (types.Results, error) {
+		return types.Results{}, assert.AnError
+	}
+
+	// Prepare test CliFlags with quiet mode
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  true,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           true,
+		SaveResults:     false,
+	}
+
+	// Act
+	err = scrapeMod(sc, mockFetchModInfoError, mockFetchDocument)
+
+	// Assert - should return the error
+	assert.Error(t, err)
+}
+
+func TestScrapeMod_FetchModInfoError_NonQuietMode(t *testing.T) {
+	// Create a temporary directory for the test
+	tempDir := t.TempDir()
+
+	// Create a temporary session-cookies.json file
+	tempFilePath := filepath.Join(tempDir, "session-cookies.json")
+	err := os.WriteFile(tempFilePath, []byte("{}"), 0644)
+	require.NoError(t, err)
+
+	// Mock function that returns an error
+	mockFetchModInfoError := func(baseUrl, game string, modId int64, concurrentFetch func(tasks ...func() error) error, fetchDocument func(targetURL string) (*goquery.Document, error)) (types.Results, error) {
+		return types.Results{}, assert.AnError
+	}
+
+	// Prepare test CliFlags without quiet mode
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  true,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     false,
+	}
+
+	// Act
+	err = scrapeMod(sc, mockFetchModInfoError, mockFetchDocument)
+
+	// Assert - should return the error
+	assert.Error(t, err)
+}
+
+func TestScrapeMod_SaveOnly_QuietMode(t *testing.T) {
+	// Create a temporary directory for the test
+	tempDir := t.TempDir()
+
+	// Create a temporary session-cookies.json file
+	tempFilePath := filepath.Join(tempDir, "session-cookies.json")
+	err := os.WriteFile(tempFilePath, []byte("{}"), 0644)
+	require.NoError(t, err)
+
+	// Create a temporary directory for output
+	tempOutputDir := filepath.Join(tempDir, "output")
+	err = os.Mkdir(tempOutputDir, 0755)
+	require.NoError(t, err)
+
+	// Prepare test CliFlags with save only and quiet mode
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  false,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           true,
+		SaveResults:     true,
+		OutputDirectory: tempOutputDir,
+	}
+
+	// Act
+	err = scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+
+	// Assert
+	assert.NoError(t, err)
+}
+
+func TestScrapeMod_HTTPClientInitError_QuietMode(t *testing.T) {
+	// Prepare test CliFlags with invalid paths (will cause HTTP client init to fail)
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: "/nonexistent/path",
+		CookieFile:      "nonexistent.json",
+		DisplayResults:  true,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           true,
+		SaveResults:     false,
+	}
+
+	// Act
+	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+
+	// Assert - should return an error from HTTP client init
+	assert.Error(t, err)
 }

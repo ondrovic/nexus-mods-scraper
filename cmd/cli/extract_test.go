@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -19,6 +20,7 @@ import (
 
 type MockCookieStore struct {
 	mock.Mock
+	mockCookies []*kooky.Cookie
 }
 
 // Implement http.CookieJar methods (since CookieStore embeds http.CookieJar)
@@ -31,10 +33,22 @@ func (m *MockCookieStore) Cookies(u *url.URL) []*http.Cookie {
 	return nil
 }
 
-// Mock the SubJar method
-func (m *MockCookieStore) SubJar(filters ...kooky.Filter) (http.CookieJar, error) {
-	args := m.Called(filters)
+// Mock the SubJar method (kooky v0.2.4 API with context)
+func (m *MockCookieStore) SubJar(ctx context.Context, filters ...kooky.Filter) (http.CookieJar, error) {
+	args := m.Called(ctx, filters)
 	return args.Get(0).(http.CookieJar), args.Error(1)
+}
+
+// Mock the TraverseCookies method (kooky v0.2.4 API)
+func (m *MockCookieStore) TraverseCookies(filters ...kooky.Filter) kooky.CookieSeq {
+	// Return a CookieSeq that yields our mock cookies
+	return kooky.CookieSeq(func(yield func(*kooky.Cookie, error) bool) {
+		for _, cookie := range m.mockCookies {
+			if !yield(cookie, nil) {
+				return
+			}
+		}
+	})
 }
 
 // Mock the ReadCookies method
@@ -73,6 +87,11 @@ func (m *MockCookieStore) Close() error {
 	return args.Error(0)
 }
 
+// Mock the ContainerName method (required by kooky v0.2.4)
+func (m *MockCookieStore) ContainerName() string {
+	return "MockContainer"
+}
+
 func (m *MockCookieStore) CookieExtractor(domain string, validCookies []string, storeFinder func() []kooky.CookieStore) (map[string]string, error) {
 	args := m.Called(domain, validCookies, storeFinder)
 	return args.Get(0).(map[string]string), args.Error(1)
@@ -98,8 +117,12 @@ func TestExtractCookies_Success(t *testing.T) {
 		Container: "MockBrowser",
 	}
 
+	// Set the mock cookies for TraverseCookies
+	mockStore.mockCookies = []*kooky.Cookie{cookie}
+
 	// Mock methods that are called by CookieExtractor
-	mockStore.On("ReadCookies", mock.Anything).Return([]*kooky.Cookie{cookie}, nil)
+	// Note: ReadCookies is no longer used - TraverseCookies is used instead (mocked via mockCookies field)
+	mockStore.On("Browser").Return("MockBrowser")
 	mockStore.On("Close").Return(nil)
 
 	// Create a mock store provider to avoid using live cookie stores
@@ -154,6 +177,9 @@ func TestExtractCookies_ErrorInCookieExtractor(t *testing.T) {
 	// Arrange: Create a mock cookie store
 	mockStore := new(MockCookieStore)
 
+	// Set empty mock cookies for TraverseCookies
+	mockStore.mockCookies = []*kooky.Cookie{}
+
 	// Mock store provider to return the mock store
 	mockStoreProvider := func() []kooky.CookieStore {
 		return []kooky.CookieStore{mockStore}
@@ -162,9 +188,10 @@ func TestExtractCookies_ErrorInCookieExtractor(t *testing.T) {
 	// Simulate error in CookieExtractor
 	mockStore.On("CookieExtractor", "example.com", []string{"session"}, mock.Anything).Return(nil, errors.New)
 
-	// Mock ReadCookies and Close (since they are called internally)
-	mockStore.On("ReadCookies", mock.Anything).Return([]*kooky.Cookie{}, nil) // Return empty slice instead of nil
-	mockStore.On("Close").Return(nil)                                         // Simulate successful closing
+	// Mock Browser and Close (since they are called internally)
+	// Note: ReadCookies is no longer used - TraverseCookies is used instead (mocked via mockCookies field)
+	mockStore.On("Browser").Return("MockBrowser")
+	mockStore.On("Close").Return(nil)
 
 	// Set the options
 	options.BaseUrl = "http://example.com"
@@ -179,5 +206,69 @@ func TestExtractCookies_ErrorInCookieExtractor(t *testing.T) {
 
 	// Assert: Verify the error from CookieExtractor is returned
 	assert.Error(t, err)
-	assert.Equal(t, "no matching cookies found", err.Error())
+	assert.Contains(t, err.Error(), "no installed browsers with browser profiles found")
+}
+
+func TestExtractCookies_NoCookieStores(t *testing.T) {
+	// Mock store provider that returns no stores
+	mockStoreProvider := func() []kooky.CookieStore {
+		return []kooky.CookieStore{}
+	}
+
+	// Set the options
+	options.BaseUrl = "http://example.com"
+	options.ValidCookies = []string{"session"}
+	options.OutputDirectory = "/tmp"
+	outputFilename = "session-cookies.json"
+	options.Interactive = false
+	options.NoValidate = true
+
+	// Act
+	cmd := &cobra.Command{}
+	args := []string{}
+	err := ExtractCookies(cmd, args, mockStoreProvider)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no cookie stores found")
+}
+
+func TestExtractCookies_SaveError(t *testing.T) {
+	// Arrange: Create a mock cookie store with valid cookies
+	mockStore := new(MockCookieStore)
+
+	cookie := &kooky.Cookie{
+		Cookie: http.Cookie{
+			Name:    "session",
+			Value:   "1234",
+			Domain:  "example.com",
+			Expires: time.Now().Add(24 * time.Hour),
+		},
+		Creation:  time.Now(),
+		Container: "MockBrowser",
+	}
+
+	mockStore.mockCookies = []*kooky.Cookie{cookie}
+	mockStore.On("Browser").Return("MockBrowser")
+	mockStore.On("Close").Return(nil)
+
+	mockStoreProvider := func() []kooky.CookieStore {
+		return []kooky.CookieStore{mockStore}
+	}
+
+	// Set options to a non-writable directory
+	options.BaseUrl = "http://example.com"
+	options.ValidCookies = []string{"session"}
+	options.OutputDirectory = "/nonexistent/readonly/path"
+	outputFilename = "session-cookies.json"
+	options.Interactive = false
+	options.NoValidate = true
+
+	// Act
+	cmd := &cobra.Command{}
+	args := []string{}
+	err := ExtractCookies(cmd, args, mockStoreProvider)
+
+	// Assert - should fail on save
+	assert.Error(t, err)
 }

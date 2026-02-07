@@ -219,3 +219,93 @@ func TestSaveModInfoToJson_EnsureDirExistsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "directory error")
 	mockUtils.AssertCalled(t, "EnsureDirExists", dir)
 }
+
+func TestDisplayResults_QuietMode(t *testing.T) {
+	// Arrange
+	sc := types.CliFlags{
+		Quiet: true, // Enable quiet mode
+	}
+	results := types.Results{
+		Mods: types.ModInfo{
+			Name:    "Mod1",
+			Creator: "Creator1",
+		},
+	}
+
+	formatFunc := func(mods types.ModInfo) (string, error) {
+		return `{"Name":"Mod1","Creator":"Creator1"}`, nil
+	}
+
+	// Act
+	err := DisplayResults(sc, results, formatFunc)
+
+	// Assert - should output plain JSON in quiet mode
+	assert.NoError(t, err)
+}
+
+func TestSaveCookiesToJson_EnsureDirExistsError(t *testing.T) {
+	// Arrange
+	dir := "testDir"
+	filename := "cookies.json"
+	data := map[string]string{"session": "1234"}
+	mockUtils := new(Mocker)
+
+	// Mocking EnsureDirExists to return an error
+	mockUtils.On("EnsureDirExists", dir).Return(fmt.Errorf("directory error"))
+
+	mockOpenFileFunc := func(name string, flag int, perm os.FileMode) (*os.File, error) {
+		return nil, nil
+	}
+
+	// Act
+	err := SaveCookiesToJson(dir, filename, data, mockOpenFileFunc, mockUtils.EnsureDirExists)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "directory error")
+}
+
+func TestSaveCookiesToJson_OpenFileError(t *testing.T) {
+	// Arrange
+	dir := "testDir"
+	filename := "cookies.json"
+	data := map[string]string{"session": "1234"}
+	mockUtils := new(Mocker)
+
+	// Mocking EnsureDirExists to return success
+	mockUtils.On("EnsureDirExists", dir).Return(nil)
+
+	// Mock openFile to return an error
+	mockOpenFileFunc := func(name string, flag int, perm os.FileMode) (*os.File, error) {
+		return nil, fmt.Errorf("open file error")
+	}
+
+	// Act
+	err := SaveCookiesToJson(dir, filename, data, mockOpenFileFunc, mockUtils.EnsureDirExists)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "open file error")
+}
+
+func TestSaveModInfoToJson_WriteFileError(t *testing.T) {
+	// Arrange - use a directory that doesn't exist
+	dir := "/nonexistent/readonly/path"
+	filename := "modinfo"
+	mockUtils := new(Mocker)
+
+	// Mocking EnsureDirExists to return success (simulating it passed)
+	mockUtils.On("EnsureDirExists", dir).Return(nil)
+
+	data := types.ModInfo{
+		Name:        "Test Mod",
+		Description: "This is a test mod",
+	}
+
+	// Act - this will fail on os.WriteFile since the path doesn't exist
+	_, err := SaveModInfoToJson(types.CliFlags{}, data, dir, filename, mockUtils.EnsureDirExists)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "error saving file")
+}

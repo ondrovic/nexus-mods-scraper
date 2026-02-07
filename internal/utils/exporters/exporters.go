@@ -20,6 +20,12 @@ func DisplayResults(sc types.CliFlags, results types.Results, formatResultsFunc 
 		return fmt.Errorf("error while attempting to format results: %v", err)
 	}
 
+	// When quiet mode is enabled, output plain JSON for piping to jq
+	if sc.Quiet {
+		fmt.Println(jsonResults)
+		return nil
+	}
+
 	formatters.PrintPrettyJson(jsonResults)
 	return nil
 }

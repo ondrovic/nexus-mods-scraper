@@ -65,22 +65,29 @@ func setCookiesFromFile(domain, dir, filename string) error {
 		return fmt.Errorf("error decoding JSON: %w", err)
 	}
 
-	// Create cookies and set them
+	// Parse domain URL to extract host
+	parsedDomain, err := url.Parse(domain)
+	if err != nil {
+		return fmt.Errorf("error parsing domain for cookies: %w", err)
+	}
+
+	// Create cookies and set them with proper attributes
 	var cookies []*http.Cookie
 	for name, value := range cookiesMap {
 		cookies = append(cookies, &http.Cookie{
-			Name:  name,
-			Value: value,
+			Name:     name,
+			Value:    value,
+			Path:     "/",
+			Domain:   parsedDomain.Hostname(),
+			Secure:   true,
+			HttpOnly: true,
+			SameSite: http.SameSiteNoneMode,
 		})
 	}
 
 	// Set cookies for the domain
 	if jar, ok := Client.(*http.Client).Jar.(*cookiejar.Jar); ok {
-		u, err := url.Parse(domain)
-		if err != nil {
-			return fmt.Errorf("error parsing domain: %w", err)
-		}
-		jar.SetCookies(u, cookies) // Cookies are set in the jar
+		jar.SetCookies(parsedDomain, cookies) // Cookies are set in the jar
 	}
 
 	return nil

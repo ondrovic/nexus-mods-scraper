@@ -26,7 +26,8 @@ func FetchModInfoConcurrent(baseUrl, game string, modId int64, concurrentFetch f
 		return types.Results{}, err
 	}
 
-	var results types.Results
+	var modInfo types.ModInfo
+	var files []types.File
 
 	// Function to handle mod info fetch
 	err := concurrentFetch(
@@ -40,9 +41,9 @@ func FetchModInfoConcurrent(baseUrl, game string, modId int64, concurrentFetch f
 				return fmt.Errorf("adult content detected, cookies not working")
 			}
 
-			results.Mods = extractors.ExtractModInfo(doc)
-			results.Mods.ModID = modId
-			results.Mods.LastChecked = time.Now()
+			modInfo = extractors.ExtractModInfo(doc)
+			modInfo.ModID = modId
+			modInfo.LastChecked = time.Now()
 			return nil
 		},
 		func() error {
@@ -58,11 +59,7 @@ func FetchModInfoConcurrent(baseUrl, game string, modId int64, concurrentFetch f
 				return err
 			}
 
-			results.Mods.Files = extractors.ExtractFileInfo(filesDoc)
-			if len(results.Mods.Files) > 0 {
-				results.Mods.LatestVersion = results.Mods.Files[0].Version
-			}
-
+			files = extractors.ExtractFileInfo(filesDoc)
 			return nil
 		},
 	)
@@ -71,7 +68,13 @@ func FetchModInfoConcurrent(baseUrl, game string, modId int64, concurrentFetch f
 		return types.Results{}, err
 	}
 
-	return results, nil
+	// Combine the results after both tasks complete
+	modInfo.Files = files
+	if len(files) > 0 {
+		modInfo.LatestVersion = files[0].Version
+	}
+
+	return types.Results{Mods: modInfo}, nil
 }
 
 // FetchDocument sends an HTTP GET request to the target URL, manually attaches cookies
@@ -95,6 +98,20 @@ func FetchDocument(targetURL string) (*goquery.Document, error) {
 		cookieHeader = append(cookieHeader, fmt.Sprintf("%s=%s", cookie.Name, cookie.Value))
 	}
 	req.Header.Set("Cookie", strings.Join(cookieHeader, "; "))
+
+	// Set browser-like headers to avoid being blocked
+	// Note: Do NOT set Accept-Encoding header - Go's http.Client handles gzip automatically
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("DNT", "1")
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Upgrade-Insecure-Requests", "1")
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	req.Header.Set("Sec-Fetch-Site", "none")
+	req.Header.Set("Sec-Fetch-User", "?1")
+	req.Header.Set("Cache-Control", "max-age=0")
 
 	// Use the global httpclient.Client to make the request
 	resp, err := httpclient.Client.Do(req)

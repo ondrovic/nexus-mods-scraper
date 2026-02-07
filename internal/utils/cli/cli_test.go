@@ -113,3 +113,43 @@ func TestRegisterFlag_PanicOnUnsupportedType(t *testing.T) {
 		RegisterFlag(cmd, "config", "c", map[string]string{}, "Unsupported type", &unsupportedTarget)
 	})
 }
+
+func TestRegisterFlag_BoolFlagDefaultTrue(t *testing.T) {
+	// Arrange
+	var boolTarget bool
+	cmd := &cobra.Command{}
+
+	// Act
+	RegisterFlag(cmd, "enabled", "e", true, "Enable feature", &boolTarget)
+
+	// Assert
+	flag := cmd.Flags().Lookup("enabled")
+	require.NotNil(t, flag)
+	assert.Equal(t, "enabled", flag.Name)
+	assert.Equal(t, "e", flag.Shorthand)
+	// When default is true, it just adds newline without "(default false)"
+	assert.Equal(t, "Enable feature\n", flag.Usage)
+	assert.Equal(t, "true", flag.DefValue)
+}
+
+func TestRegisterFlag_PanicOnUnsupportedSliceType(t *testing.T) {
+	// Arrange
+	var unsupportedSlice []int
+	cmd := &cobra.Command{}
+
+	// Act & Assert
+	assert.PanicsWithValue(t, "unsupported slice type", func() {
+		RegisterFlag(cmd, "numbers", "n", []string{"1", "2"}, "Numbers", &unsupportedSlice)
+	})
+}
+
+func TestRegisterFlag_PanicOnUnsupportedTargetType(t *testing.T) {
+	// Arrange - target type doesn't match value type
+	var floatTarget float32 // Using float32 instead of float64
+	cmd := &cobra.Command{}
+
+	// Act & Assert
+	assert.PanicsWithValue(t, "unsupported flag type", func() {
+		RegisterFlag(cmd, "ratio", "r", 1.5, "Ratio", &floatTarget)
+	})
+}

@@ -1,8 +1,11 @@
 package extractors
 
 import (
+	"context"
+	"iter"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +21,7 @@ import (
 
 type MockCookieStore struct {
 	mock.Mock
+	mockCookies []*kooky.Cookie
 }
 
 // Implement http.CookieJar methods (since CookieStore embeds http.CookieJar)
@@ -30,10 +34,22 @@ func (m *MockCookieStore) Cookies(u *url.URL) []*http.Cookie {
 	return nil
 }
 
-// Mock the SubJar method
-func (m *MockCookieStore) SubJar(filters ...kooky.Filter) (http.CookieJar, error) {
-	args := m.Called(filters)
+// Mock the SubJar method (kooky v0.2.4 API with context)
+func (m *MockCookieStore) SubJar(ctx context.Context, filters ...kooky.Filter) (http.CookieJar, error) {
+	args := m.Called(ctx, filters)
 	return args.Get(0).(http.CookieJar), args.Error(1)
+}
+
+// Mock the TraverseCookies method (kooky v0.2.4 API)
+func (m *MockCookieStore) TraverseCookies(filters ...kooky.Filter) kooky.CookieSeq {
+	// Return a CookieSeq that yields our mock cookies
+	return kooky.CookieSeq(func(yield func(*kooky.Cookie, error) bool) {
+		for _, cookie := range m.mockCookies {
+			if !yield(cookie, nil) {
+				return
+			}
+		}
+	})
 }
 
 // Mock the ReadCookies method
@@ -72,6 +88,36 @@ func (m *MockCookieStore) Close() error {
 	return args.Error(0)
 }
 
+// Mock the ContainerName method (required by kooky v0.2.4)
+func (m *MockCookieStore) ContainerName() string {
+	return "MockContainer"
+}
+
+// Mock the CookieSeq interface for iteration
+type mockCookieSeq struct {
+	cookies []*kooky.Cookie
+}
+
+func (m *mockCookieSeq) All() iter.Seq2[*kooky.Cookie, error] {
+	return func(yield func(*kooky.Cookie, error) bool) {
+		for _, cookie := range m.cookies {
+			if !yield(cookie, nil) {
+				return
+			}
+		}
+	}
+}
+
+func (m *mockCookieSeq) OnlyCookies() iter.Seq[*kooky.Cookie] {
+	return func(yield func(*kooky.Cookie) bool) {
+		for _, cookie := range m.cookies {
+			if !yield(cookie) {
+				return
+			}
+		}
+	}
+}
+
 func TestIsAdultContent(t *testing.T) {
 	html := `<html><h3 id="12345-title">Adult content</h3></html>`
 	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
@@ -95,8 +141,11 @@ func TestCookieExtractor_Success(t *testing.T) {
 		Container: "MockBrowser",
 	}
 
+	// Set the mock cookies for TraverseCookies
+	mockStore.mockCookies = []*kooky.Cookie{cookie}
+
 	// Mock methods that are actually called by CookieExtractor
-	mockStore.On("ReadCookies", mock.Anything).Return([]*kooky.Cookie{cookie}, nil)
+	// Note: ReadCookies is no longer used - TraverseCookies is used instead (mocked via mockCookies field)
 	mockStore.On("Close").Return(nil)
 
 	// Create a mock function that returns the mock store
@@ -132,8 +181,11 @@ func TestCookieExtractor_NoMatchingCookies(t *testing.T) {
 	// Arrange: Create a mock cookie store that returns no matching cookies
 	mockStore := new(MockCookieStore)
 
-	// No matching cookies
-	mockStore.On("ReadCookies", mock.Anything).Return([]*kooky.Cookie{}, nil)
+	// No matching cookies - empty mockCookies slice
+	mockStore.mockCookies = []*kooky.Cookie{}
+
+	// Mock methods that are actually called by CookieExtractor
+	// Note: ReadCookies is no longer used - TraverseCookies is used instead (mocked via mockCookies field)
 	mockStore.On("Close").Return(nil)
 
 	// Mock function that returns the mock store
@@ -350,4 +402,704 @@ func TestExtractTags(t *testing.T) {
 	result := extractTags(doc)
 	assert.Len(t, result, 1)
 	assert.Equal(t, "Tag1", result[0])
+}
+
+// Tests for enhanced_cookie_extractor.go
+
+func TestEnhancedCookieExtractor_NoCookieStores(t *testing.T) {
+	mockStoreProvider := func() []kooky.CookieStore {
+		return []kooky.CookieStore{}
+	}
+
+	result, err := EnhancedCookieExtractor("nonexistent-domain-for-test.invalid", []string{"session"}, mockStoreProvider, false)
+
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "no cookie stores found")
+}
+
+func TestExtractFromStore(t *testing.T) {
+	mockStore := new(MockCookieStore)
+
+	cookie := &kooky.Cookie{
+		Cookie: http.Cookie{
+			Name:    "test_cookie",
+			Value:   "test_value",
+			Domain:  "example.com",
+			Expires: time.Now().Add(24 * time.Hour),
+		},
+	}
+
+	mockStore.mockCookies = []*kooky.Cookie{cookie}
+	mockStore.On("Browser").Return("TestBrowser")
+
+	result := extractFromStore(mockStore, "example.com", []string{"test_cookie"})
+
+	assert.Equal(t, "TestBrowser", result.BrowserName)
+	assert.Len(t, result.Cookies, 1)
+	assert.Equal(t, "test_value", result.Cookies["test_cookie"].Value)
+}
+
+func TestGetBrowserName(t *testing.T) {
+	mockStore := new(MockCookieStore)
+	mockStore.On("Browser").Return("Firefox")
+
+	result := getBrowserName(mockStore)
+	assert.Equal(t, "Firefox", result)
+}
+
+func TestGetBrowserName_Empty(t *testing.T) {
+	mockStore := new(MockCookieStore)
+	mockStore.On("Browser").Return("")
+
+	result := getBrowserName(mockStore)
+	assert.Equal(t, "Unknown Browser", result)
+}
+
+func TestSelectBestCookieStore(t *testing.T) {
+	stores := []types.BrowserCookieStore{
+		{
+			BrowserName: "Firefox",
+			Cookies: map[string]types.Cookie{
+				"session": {Value: "firefox_session", Expires: time.Now().Add(24 * time.Hour)},
+			},
+		},
+		{
+			BrowserName: "Chrome",
+			Cookies: map[string]types.Cookie{
+				"session":         {Value: "chrome_session", Expires: time.Now().Add(48 * time.Hour)},
+				"session_refresh": {Value: "chrome_refresh", Expires: time.Now().Add(48 * time.Hour)},
+			},
+		},
+	}
+
+	result := selectBestCookieStore(stores, []string{"session", "session_refresh"})
+
+	assert.NotNil(t, result)
+	assert.Equal(t, "Chrome", result.BrowserName) // Chrome has more cookies
+}
+
+func TestSelectBestCookieStore_SameCount_MoreRecent(t *testing.T) {
+	stores := []types.BrowserCookieStore{
+		{
+			BrowserName: "Firefox",
+			Cookies: map[string]types.Cookie{
+				"session": {Value: "firefox_session", Expires: time.Now().Add(24 * time.Hour)},
+			},
+		},
+		{
+			BrowserName: "Chrome",
+			Cookies: map[string]types.Cookie{
+				"session": {Value: "chrome_session", Expires: time.Now().Add(48 * time.Hour)}, // More recent
+			},
+		},
+	}
+
+	result := selectBestCookieStore(stores, []string{"session"})
+
+	assert.NotNil(t, result)
+	assert.Equal(t, "Chrome", result.BrowserName) // Chrome has more recent expiry
+}
+
+func TestSelectBestCookieStore_Empty(t *testing.T) {
+	stores := []types.BrowserCookieStore{}
+
+	result := selectBestCookieStore(stores, []string{"session"})
+
+	assert.Nil(t, result)
+}
+
+func TestSelectBestCookieStore_WithErrors(t *testing.T) {
+	stores := []types.BrowserCookieStore{
+		{
+			BrowserName: "Firefox",
+			Error:       "file not found",
+		},
+		{
+			BrowserName: "Chrome",
+			Cookies: map[string]types.Cookie{
+				"session": {Value: "chrome_session"},
+			},
+		},
+	}
+
+	result := selectBestCookieStore(stores, []string{"session"})
+
+	assert.NotNil(t, result)
+	assert.Equal(t, "Chrome", result.BrowserName)
+}
+
+func TestGetCookieExpirationSummary_NoCookies(t *testing.T) {
+	cookies := map[string]types.Cookie{}
+	result := GetCookieExpirationSummary(cookies)
+	assert.Equal(t, "No cookies", result)
+}
+
+func TestGetCookieExpirationSummary_NoExpiration(t *testing.T) {
+	cookies := map[string]types.Cookie{
+		"session": {Value: "test"},
+	}
+	result := GetCookieExpirationSummary(cookies)
+	assert.Equal(t, "No expiration set", result)
+}
+
+func TestGetCookieExpirationSummary_Expired(t *testing.T) {
+	cookies := map[string]types.Cookie{
+		"session": {Value: "test", Expires: time.Now().Add(-24 * time.Hour)},
+	}
+	result := GetCookieExpirationSummary(cookies)
+	assert.Equal(t, "Expired", result)
+}
+
+func TestGetCookieExpirationSummary_ExpiresInDays(t *testing.T) {
+	cookies := map[string]types.Cookie{
+		"session": {Value: "test", Expires: time.Now().Add(45 * 24 * time.Hour)},
+	}
+	result := GetCookieExpirationSummary(cookies)
+	assert.Contains(t, result, "Expires in")
+	assert.Contains(t, result, "days")
+}
+
+func TestGetCookieExpirationSummary_ExpiresWarning(t *testing.T) {
+	cookies := map[string]types.Cookie{
+		"session": {Value: "test", Expires: time.Now().Add(10 * 24 * time.Hour)},
+	}
+	result := GetCookieExpirationSummary(cookies)
+	assert.Contains(t, result, "⚠")
+	assert.Contains(t, result, "days")
+}
+
+func TestGetCookieExpirationSummary_ExpiresInHours(t *testing.T) {
+	cookies := map[string]types.Cookie{
+		"session": {Value: "test", Expires: time.Now().Add(5 * time.Hour)},
+	}
+	result := GetCookieExpirationSummary(cookies)
+	assert.Contains(t, result, "⚠")
+	assert.Contains(t, result, "hours")
+}
+
+func TestSortBrowserStoresByName(t *testing.T) {
+	stores := []types.BrowserCookieStore{
+		{BrowserName: "Firefox"},
+		{BrowserName: "Chrome"},
+		{BrowserName: "Brave"},
+	}
+
+	SortBrowserStoresByName(stores)
+
+	assert.Equal(t, "Brave", stores[0].BrowserName)
+	assert.Equal(t, "Chrome", stores[1].BrowserName)
+	assert.Equal(t, "Firefox", stores[2].BrowserName)
+}
+
+func TestIsFileNotFoundError(t *testing.T) {
+	assert.True(t, isFileNotFoundError("no such file or directory"))
+	assert.True(t, isFileNotFoundError("file cannot find path"))
+	assert.True(t, isFileNotFoundError("path does not exist"))
+	assert.False(t, isFileNotFoundError("permission denied"))
+	assert.False(t, isFileNotFoundError("connection refused"))
+}
+
+// Additional tests for IsAdultContent edge cases
+
+func TestIsAdultContent_PleaseLogin(t *testing.T) {
+	html := `<html><h1>Please log in or register</h1></html>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := IsAdultContent(doc, 12345)
+	assert.True(t, result)
+}
+
+func TestIsAdultContent_AdultDisabled(t *testing.T) {
+	html := `<html><h3>Adult content disabled</h3></html>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := IsAdultContent(doc, 12345)
+	assert.True(t, result)
+}
+
+func TestIsAdultContent_NotAdult(t *testing.T) {
+	html := `<html><h1>Welcome to the mod page</h1><div id="12345-title">Mod Title</div></html>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := IsAdultContent(doc, 12345)
+	assert.False(t, result)
+}
+
+func TestExtractCleanTextExcludingElementText_NoExclude(t *testing.T) {
+	html := `<div class="element">Hello World</div>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := extractCleanTextExcludingElementText(doc, ".element", "span")
+	assert.Equal(t, "Hello World", result)
+}
+
+// Tests for cookie_validator.go extractUsername function
+
+func TestExtractUsername_FromProfileMenu(t *testing.T) {
+	html := `<html>
+		<div class="user-profile-menu">
+			<div class="user-profile-menu-info">
+				<h3>TestUser123</h3>
+			</div>
+		</div>
+	</html>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := extractUsername(doc)
+	assert.Equal(t, "TestUser123", result)
+}
+
+func TestExtractUsername_FromProfileMenuInfo(t *testing.T) {
+	html := `<html>
+		<div class="user-profile-menu-info">
+			<h3>  ProfileUser  </h3>
+		</div>
+	</html>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := extractUsername(doc)
+	assert.Equal(t, "ProfileUser", result)
+}
+
+func TestExtractUsername_FromHeaderUserName(t *testing.T) {
+	html := `<html>
+		<header>
+			<span class="user-name">HeaderUser</span>
+		</header>
+	</html>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := extractUsername(doc)
+	assert.Equal(t, "HeaderUser", result)
+}
+
+func TestExtractUsername_FromUserInfo(t *testing.T) {
+	html := `<html>
+		<div class="user-info">
+			<span class="username">InfoUser</span>
+		</div>
+	</html>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := extractUsername(doc)
+	assert.Equal(t, "InfoUser", result)
+}
+
+func TestExtractUsername_WithLoginLink(t *testing.T) {
+	html := `<html>
+		<a href="/users/login">Sign In</a>
+	</html>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := extractUsername(doc)
+	assert.Equal(t, "", result)
+}
+
+func TestExtractUsername_UnknownUser(t *testing.T) {
+	html := `<html>
+		<div>Some other content</div>
+	</html>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := extractUsername(doc)
+	assert.Equal(t, "Unknown User", result)
+}
+
+// Tests for browser_paths.go copyToTemp function
+
+func TestCopyToTemp_Success(t *testing.T) {
+	// Create a temporary source file
+	srcFile, err := os.CreateTemp("", "test-source-*.txt")
+	assert.NoError(t, err)
+	defer os.Remove(srcFile.Name())
+
+	testContent := []byte("test cookie database content")
+	_, err = srcFile.Write(testContent)
+	assert.NoError(t, err)
+	srcFile.Close()
+
+	// Test copyToTemp
+	tempPath, err := copyToTemp(srcFile.Name())
+	assert.NoError(t, err)
+	assert.NotEmpty(t, tempPath)
+	defer os.Remove(tempPath)
+
+	// Verify content was copied
+	copiedContent, err := os.ReadFile(tempPath)
+	assert.NoError(t, err)
+	assert.Equal(t, testContent, copiedContent)
+}
+
+func TestCopyToTemp_SourceNotFound(t *testing.T) {
+	tempPath, err := copyToTemp("/nonexistent/path/to/file.db")
+	assert.Error(t, err)
+	assert.Empty(t, tempPath)
+}
+
+// Tests for browser_paths.go browserPath struct and related functions
+
+func TestGetBrowserPaths_ReturnsSlice(t *testing.T) {
+	// This test just ensures the function doesn't panic
+	// and returns an empty or populated slice
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("Cannot get user home directory")
+	}
+
+	paths := getBrowserPaths(home)
+	assert.NotNil(t, paths)
+	// We just verify it returns a slice, not its contents (platform-dependent)
+}
+
+func TestFindFirefoxProfiles_NoDirectory(t *testing.T) {
+	// Test with non-existent directory
+	paths := findFirefoxProfiles("/nonexistent/path", "firefox")
+	assert.Empty(t, paths)
+}
+
+func TestFindChromiumProfiles_NoDirectory(t *testing.T) {
+	// Test with non-existent directory
+	paths := findChromiumProfiles("/nonexistent/path", "chrome")
+	assert.Empty(t, paths)
+}
+
+func TestFindFirefoxProfiles_WithTempDir(t *testing.T) {
+	// Create a temporary directory structure
+	tempDir, err := os.MkdirTemp("", "firefox-test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create a profile directory with cookies.sqlite
+	profileDir := tempDir + "/test.default-release"
+	err = os.Mkdir(profileDir, 0755)
+	assert.NoError(t, err)
+
+	cookiesFile, err := os.Create(profileDir + "/cookies.sqlite")
+	assert.NoError(t, err)
+	cookiesFile.Close()
+
+	// Test findFirefoxProfiles
+	paths := findFirefoxProfiles(tempDir, "firefox")
+	assert.NotEmpty(t, paths)
+	assert.Equal(t, "firefox", paths[0].Browser)
+	assert.Equal(t, "test.default-release", paths[0].Profile)
+	assert.False(t, paths[0].IsChromium)
+}
+
+func TestFindChromiumProfiles_WithTempDir(t *testing.T) {
+	// Create a temporary directory structure
+	tempDir, err := os.MkdirTemp("", "chrome-test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create Default profile directory with Cookies file
+	defaultDir := tempDir + "/Default"
+	err = os.Mkdir(defaultDir, 0755)
+	assert.NoError(t, err)
+
+	cookiesFile, err := os.Create(defaultDir + "/Cookies")
+	assert.NoError(t, err)
+	cookiesFile.Close()
+
+	// Test findChromiumProfiles
+	paths := findChromiumProfiles(tempDir, "chrome")
+	assert.NotEmpty(t, paths)
+	assert.Equal(t, "chrome", paths[0].Browser)
+	assert.Equal(t, "Default", paths[0].Profile)
+	assert.True(t, paths[0].IsDefault)
+	assert.True(t, paths[0].IsChromium)
+}
+
+func TestFindChromiumProfiles_WithNumberedProfile(t *testing.T) {
+	// Create a temporary directory structure
+	tempDir, err := os.MkdirTemp("", "chrome-test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create Profile 1 directory with Cookies file
+	profileDir := tempDir + "/Profile 1"
+	err = os.Mkdir(profileDir, 0755)
+	assert.NoError(t, err)
+
+	cookiesFile, err := os.Create(profileDir + "/Cookies")
+	assert.NoError(t, err)
+	cookiesFile.Close()
+
+	// Test findChromiumProfiles
+	paths := findChromiumProfiles(tempDir, "chrome")
+	assert.NotEmpty(t, paths)
+	assert.Equal(t, "chrome", paths[0].Browser)
+	assert.Equal(t, "Profile 1", paths[0].Profile)
+	assert.False(t, paths[0].IsDefault)
+	assert.True(t, paths[0].IsChromium)
+}
+
+func TestFindFirefoxProfiles_WithProfilesIni(t *testing.T) {
+	// Create a temporary directory structure
+	tempDir, err := os.MkdirTemp("", "firefox-test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create profiles.ini file
+	profilesIni, err := os.Create(tempDir + "/profiles.ini")
+	assert.NoError(t, err)
+	profilesIni.WriteString("[Profile0]\nName=default\n")
+	profilesIni.Close()
+
+	// Create a profile directory with cookies.sqlite
+	profileDir := tempDir + "/default"
+	err = os.Mkdir(profileDir, 0755)
+	assert.NoError(t, err)
+
+	cookiesFile, err := os.Create(profileDir + "/cookies.sqlite")
+	assert.NoError(t, err)
+	cookiesFile.Close()
+
+	// Test findFirefoxProfiles - should still find the profile
+	paths := findFirefoxProfiles(tempDir, "firefox")
+	assert.NotEmpty(t, paths)
+	assert.Equal(t, "firefox", paths[0].Browser)
+	assert.True(t, paths[0].IsDefault) // "default" directory name marks it as default
+}
+
+// Additional tests for enhanced_cookie_extractor.go
+
+func TestEnhancedCookieExtractor_Success(t *testing.T) {
+	mockStore := new(MockCookieStore)
+
+	cookie := &kooky.Cookie{
+		Cookie: http.Cookie{
+			Name:    "session",
+			Value:   "abc123",
+			Domain:  "example.com",
+			Expires: time.Now().Add(24 * time.Hour),
+		},
+	}
+
+	mockStore.mockCookies = []*kooky.Cookie{cookie}
+	mockStore.On("Browser").Return("TestBrowser")
+	mockStore.On("Close").Return(nil)
+
+	mockStoreProvider := func() []kooky.CookieStore {
+		return []kooky.CookieStore{mockStore}
+	}
+
+	result, err := EnhancedCookieExtractor("example.com", []string{"session"}, mockStoreProvider, false)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, "TestBrowser", result.SelectedBrowser)
+	assert.Equal(t, "abc123", result.SelectedCookies["session"])
+}
+
+func TestEnhancedCookieExtractor_MissingCookies(t *testing.T) {
+	mockStore := new(MockCookieStore)
+
+	cookie := &kooky.Cookie{
+		Cookie: http.Cookie{
+			Name:    "session",
+			Value:   "abc123",
+			Domain:  "example.com",
+			Expires: time.Now().Add(24 * time.Hour),
+		},
+	}
+
+	mockStore.mockCookies = []*kooky.Cookie{cookie}
+	mockStore.On("Browser").Return("TestBrowser")
+	mockStore.On("Close").Return(nil)
+
+	mockStoreProvider := func() []kooky.CookieStore {
+		return []kooky.CookieStore{mockStore}
+	}
+
+	// Require two cookies but only one exists
+	result, err := EnhancedCookieExtractor("example.com", []string{"session", "session_refresh"}, mockStoreProvider, false)
+
+	assert.Error(t, err)
+	assert.NotNil(t, result)
+	assert.Contains(t, err.Error(), "missing required cookies")
+	assert.Contains(t, err.Error(), "session_refresh")
+}
+
+func TestEnhancedCookieExtractor_NoValidCookies(t *testing.T) {
+	mockStore := new(MockCookieStore)
+
+	// No cookies at all
+	mockStore.mockCookies = []*kooky.Cookie{}
+	mockStore.On("Browser").Return("TestBrowser")
+	mockStore.On("Close").Return(nil)
+
+	mockStoreProvider := func() []kooky.CookieStore {
+		return []kooky.CookieStore{mockStore}
+	}
+
+	result, err := EnhancedCookieExtractor("example.com", []string{"session"}, mockStoreProvider, false)
+
+	assert.Error(t, err)
+	// The error message depends on whether the browser store is filtered out
+	assert.NotNil(t, result)
+}
+
+func TestEnhancedCookieExtractor_ShowAllBrowsers(t *testing.T) {
+	mockStore := new(MockCookieStore)
+
+	// No cookies but showAllBrowsers is true
+	mockStore.mockCookies = []*kooky.Cookie{}
+	mockStore.On("Browser").Return("TestBrowser")
+	mockStore.On("Close").Return(nil)
+
+	mockStoreProvider := func() []kooky.CookieStore {
+		return []kooky.CookieStore{mockStore}
+	}
+
+	result, err := EnhancedCookieExtractor("example.com", []string{"session"}, mockStoreProvider, true)
+
+	assert.Error(t, err) // Still errors because no valid cookies
+	assert.NotNil(t, result)
+	// The browser store should be included when showAllBrowsers is true
+	// but empty stores without errors might still be filtered
+}
+
+func TestEnhancedCookieExtractor_MultipleBrowsers(t *testing.T) {
+	mockStore1 := new(MockCookieStore)
+	mockStore2 := new(MockCookieStore)
+
+	cookie1 := &kooky.Cookie{
+		Cookie: http.Cookie{
+			Name:    "session",
+			Value:   "firefox_session",
+			Domain:  "example.com",
+			Expires: time.Now().Add(24 * time.Hour),
+		},
+	}
+
+	cookie2a := &kooky.Cookie{
+		Cookie: http.Cookie{
+			Name:    "session",
+			Value:   "chrome_session",
+			Domain:  "example.com",
+			Expires: time.Now().Add(48 * time.Hour),
+		},
+	}
+	cookie2b := &kooky.Cookie{
+		Cookie: http.Cookie{
+			Name:    "session_refresh",
+			Value:   "chrome_refresh",
+			Domain:  "example.com",
+			Expires: time.Now().Add(48 * time.Hour),
+		},
+	}
+
+	mockStore1.mockCookies = []*kooky.Cookie{cookie1}
+	mockStore1.On("Browser").Return("Firefox")
+	mockStore1.On("Close").Return(nil)
+
+	mockStore2.mockCookies = []*kooky.Cookie{cookie2a, cookie2b}
+	mockStore2.On("Browser").Return("Chrome")
+	mockStore2.On("Close").Return(nil)
+
+	mockStoreProvider := func() []kooky.CookieStore {
+		return []kooky.CookieStore{mockStore1, mockStore2}
+	}
+
+	result, err := EnhancedCookieExtractor("example.com", []string{"session", "session_refresh"}, mockStoreProvider, false)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, "Chrome", result.SelectedBrowser) // Chrome has both cookies
+}
+
+func TestSelectBestCookieStore_AllWithErrors(t *testing.T) {
+	stores := []types.BrowserCookieStore{
+		{
+			BrowserName: "Firefox",
+			Error:       "file not found",
+		},
+		{
+			BrowserName: "Chrome",
+			Error:       "permission denied",
+		},
+	}
+
+	result := selectBestCookieStore(stores, []string{"session"})
+
+	assert.Nil(t, result)
+}
+
+func TestSelectBestCookieStore_NoCookiesInAny(t *testing.T) {
+	stores := []types.BrowserCookieStore{
+		{
+			BrowserName: "Firefox",
+			Cookies:     map[string]types.Cookie{},
+		},
+		{
+			BrowserName: "Chrome",
+			Cookies:     map[string]types.Cookie{},
+		},
+	}
+
+	result := selectBestCookieStore(stores, []string{"session"})
+
+	assert.Nil(t, result)
+}
+
+// Tests for FindAdditionalBrowserCookies edge cases
+
+func TestFindAdditionalBrowserCookies_NoBrowsers(t *testing.T) {
+	// This test verifies the function doesn't crash when no browsers exist
+	result := FindAdditionalBrowserCookies("nonexistent-domain.invalid", []string{"session"})
+
+	// Should return empty slice (nil is also acceptable for empty slice in Go)
+	assert.Empty(t, result)
+}
+
+// Tests for extractors.go extractElementText edge cases
+
+func TestExtractElementText_Empty(t *testing.T) {
+	html := `<div class="element"></div>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := extractElementText(doc, ".element")
+	assert.Equal(t, "", result)
+}
+
+func TestExtractElementText_NotFound(t *testing.T) {
+	html := `<div class="other">text</div>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := extractElementText(doc, ".element")
+	assert.Equal(t, "", result)
+}
+
+func TestExtractTags_Empty(t *testing.T) {
+	html := `<div class="sideitems side-tags"><ul class="tags"></ul></div>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := extractTags(doc)
+	assert.Empty(t, result)
+}
+
+func TestExtractChangeLogs_Empty(t *testing.T) {
+	html := `<div id="section"><div></div></div>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := extractChangeLogs(doc)
+	assert.Empty(t, result)
+}
+
+func TestExtractRequirements_NotFound(t *testing.T) {
+	html := `<div class="tabbed-block"><h3>Other requirements</h3></div>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := extractRequirements(doc, "Nexus requirements")
+	assert.Empty(t, result)
+}
+
+func TestExtractFileInfo_Empty(t *testing.T) {
+	html := `<div></div>`
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+
+	result := ExtractFileInfo(doc)
+	assert.Empty(t, result)
 }

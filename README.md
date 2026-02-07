@@ -5,132 +5,282 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/ondrovic/nexus-mods-scraper)](https://goreportcard.com/report/github.com/ondrovic/nexus-mods-scraper)
 # NexusMods Scraper CLI
 
-A powerful command-line tool to scrape mod information from [https://nexusmods.com](https://nexusmods.com) and return the results in JSON format. This tool also supports extracting cookies from the NexusMods site, which is require to properly scrape the data.
+A powerful command-line tool to scrape mod information from [https://nexusmods.com](https://nexusmods.com) and return the results in JSON format. This tool also supports extracting cookies from your browsers automatically, which is required to properly scrape the data.
+
+## Features
+
+- **Cross-Platform**: Works on Linux, macOS, and Windows
+- **Cross-Browser**: Automatically detects cookies from Chrome, Firefox, Brave, Edge, Safari, Vivaldi, Opera, and more
+- **Smart Cookie Detection**: Automatically finds and selects the best available cookies
+- **Cookie Validation**: Verifies cookies work before saving
+- **Interactive Mode**: Manual cookie entry when automatic extraction fails
+- **Adult Content Support**: Properly handles adult-rated mods (requires valid login)
 
 ## Requirements
 
-To run the scraper, you need to have a valid `session-cookies.json` file containing your session cookies for NexusMods. You can run the `extract` command and it should grab and save them as long as they exist.
+To run the scraper, you need to have valid session cookies for NexusMods. The easiest way is to:
 
-### Example `session-cookies.json` format:
+1. Log into your NexusMods account in your browser
+2. Run the `extract` command to automatically grab your cookies
+
+### Manual Cookie Setup
+
+If automatic extraction doesn't work, you can create a `session-cookies.json` file manually:
 
 ```json
 {
-  "nexusmods_session": "<value from your session>",
-  "nexusmods_session_refresh": "<value from your session>"
+  "nexusmods_session": "<value from your browser>",
+  "nexusmods_session_refresh": "<value from your browser>"
 }
 ```
 
-**Important Note:**  
-You need to have logged into your NexusMods account in your browser.
-
-The generation of this is now provided by the [extract command](#extract-cookies-command)
+Place this file in `~/.nexus-mods-scraper/data/` (or specify a custom path with flags).
 
 ## Installation
 
-To install and run this CLI tool, clone the repository and build the project:
+Clone the repository and build the project:
 
 ```bash
 git clone git@github.com:ondrovic/nexus-mods-scraper.git
 cd nexus-mods-scraper
-go build -o scraper
+go build -o nexus-mods-scraper
 
--or-
-
+# or use make
 make build
-```
-
-## Just run it
-
-To just run the scraper without installing it:
-
-```bash
-git clone git@github.com:ondrovic/nexus-mods-scraper.git
-cd nexus-mods-scraper
-go run nexus-mods-scraper.go
 ```
 
 ## Usage
 
-### Scrape Command
-
-The `scrape` command fetches mod information for a specific game and mod ID from NexusMods and outputs the results in JSON format.
-
-```bash
-./nexus-mods-scraper scrape <game-name> <mod-id> [flags]
-```
-
-#### Flags:
-
-- `-u, --base-url` (default: `https://nexusmods.com`): Base URL for NexusMods.
-- `-d, --cookie-directory` (default: `~/.nexus-mods-scraper/data`): Directory where the cookie file is stored.
-- `-f, --cookie-filename` (default: `session-cookies.json`): Filename for the session cookies.
-- `-r, --display-results` (default: `false`): Display the results in the terminal.
-- `-s, --save-results` (default: `false`): Save the results to a JSON file.
-- `-o, --output-directory` (default: `~/.nexus-mods-scraper/data`): Directory where the JSON output will be saved.
-- `-c, --valid-cookie-names` (default: `[]string{"nexusmods_session", "nexusmods_session_refresh"}`): Names of the cookies you wish to extract and use.
-
-#### Flags Notes:
-
-At least one of these flags needs to be provided:
-
-```bash
--r, --display-results
--s, --save-results
-```
-
-#### Example:
-
-```bash
-./nexus-mods-scraper scrape "skyrim" 12345 --display-results
-```
-
-This will fetch mod ID `12345` for the game `Skyrim` and display the results in the terminal.
-
 ### Extract Cookies Command
 
-The `extract` command extracts valid cookies for NexusMods and saves them to a JSON file, which is used for authentication in the scraper.
-
-#### Examples:
+The `extract` command automatically finds and extracts your NexusMods cookies from installed browsers.
 
 ```bash
 ./nexus-mods-scraper extract [flags]
 ```
 
-This will extract the default cookies and save them to the default location.
+#### Example Output
 
-```bash
-./nexus-mods-scraper extract -c "cookie_name","another_cookie","cookie"
+```
+🔍 Searching for cookies in installed browsers...
+═══════════════════════════════════════════════════════════
+✓ firefox: found 2/2 cookies [nexusmods_session, nexusmods_session_refresh] (selected)
+✓ chrome: found 1/2 cookies [nexusmods_session]
+═══════════════════════════════════════════════════════════
+
+📦 Using cookies from: firefox
+⏰ Expires in 30 days
+
+🔍 Validating cookies...
+✓ Cookies validated
+Extracted cookies saved to ~/.nexus-mods-scraper/data/session-cookies.json
 ```
 
-This will attempt to extract the cookies specified, if found they will be saved in the default location.
+#### Flags
 
-#### Flags:
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--base-url` | `-u` | `https://nexusmods.com` | Base URL for NexusMods |
+| `--output-directory` | `-d` | `~/.nexus-mods-scraper/data` | Directory to save cookies |
+| `--output-filename` | `-f` | `session-cookies.json` | Filename for cookies |
+| `--valid-cookie-names` | `-c` | `nexusmods_session,nexusmods_session_refresh` | Cookie names to extract |
+| `--interactive` | `-i` | `false` | Enable interactive mode for manual entry |
+| `--no-validate` | `-n` | `false` | Skip cookie validation |
+| `--show-all-browsers` | `-a` | `false` | Show all browsers checked (for debugging) |
 
-- `-d, --output-directory` (default: `~/.nexus-mods-scraper/data`): Directory where the output file is saved.
-- `-f, --output-filename` (default: `session-cookies.json`): Filename to save the session cookies.
-- `-c, --valid-cookie-names` (default: `[]string{"nexusmods_session", "nexusmods_session_refresh"}`): Names of the cookies you wish to extract and use.
+#### Interactive Mode
 
-#### Example:
+If automatic extraction fails, use interactive mode to manually enter cookies:
 
 ```bash
-./nexus-mods-scraper extract --output-filename my-cookies.json
+./nexus-mods-scraper extract --interactive
 ```
 
-This will extract the cookies and save them as `my-cookies.json`.
+This will:
+1. Let you choose between automatic or manual extraction
+2. Provide instructions for finding cookies in your browser's DevTools
+3. Prompt you to enter each cookie value
+4. Validate and save the cookies
+
+### Scrape Command
+
+The `scrape` command fetches mod information and outputs JSON.
+
+```bash
+./nexus-mods-scraper scrape <game-name> <mod-id> [flags]
+```
+
+#### Example
+
+```bash
+./nexus-mods-scraper scrape cyberpunk2077 26976
+```
+
+#### Flags
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--base-url` | `-u` | `https://nexusmods.com` | Base URL for NexusMods |
+| `--cookie-directory` | `-d` | `~/.nexus-mods-scraper/data` | Directory containing cookies |
+| `--cookie-filename` | `-f` | `session-cookies.json` | Cookie filename |
+| `--display-results` | `-r` | `true` | Display results in terminal |
+| `--save-results` | `-s` | `false` | Save results to JSON file |
+| `--output-directory` | `-o` | `~/.nexus-mods-scraper/data` | Directory for output files |
+| `--quiet` | `-q` | `false` | Suppress spinners/status for piping to jq |
+| `--valid-cookie-names` | `-c` | `nexusmods_session,nexusmods_session_refresh` | Cookie names to use |
+
+#### Quiet Mode for Scripting
+
+Use `--quiet` (or `-q`) to suppress spinners and status messages, making the output suitable for piping to `jq` or other tools:
+
+```bash
+# Pipe to jq for processing
+./nexus-mods-scraper scrape cyberpunk2077 26976 -q | jq '.Name'
+
+# Save to file
+./nexus-mods-scraper scrape cyberpunk2077 26976 -q > mod-info.json
+
+# Extract specific fields
+./nexus-mods-scraper scrape skyrimspecialedition 3863 -q | jq '{name: .Name, version: .LatestVersion}'
+```
+
+#### Output Example
+
+```json
+{
+  "Name": "My Awesome Mod",
+  "Creator": "ModAuthor",
+  "ShortDescription": "A great mod for the game",
+  "LastUpdated": "06 February 2026, 1:43PM",
+  "LatestVersion": "1.3",
+  "Files": [
+    {
+      "name": "Main File",
+      "version": "1.3",
+      "fileSize": "325KB",
+      "uploadDate": "06 Feb 2026, 1:43PM"
+    }
+  ],
+  "Dependencies": [
+    {"Name": "RequiredMod"}
+  ],
+  "ChangeLogs": [
+    {
+      "Version": "Version 1.3",
+      "Notes": ["Added new feature", "Fixed bugs"]
+    }
+  ],
+  "Tags": ["Gameplay", "Quality of Life"],
+  "VirusStatus": "Safe to use"
+}
+```
+
+## Supported Browsers
+
+The cookie extractor supports these browsers across all platforms:
+
+| Browser | Linux | macOS | Windows |
+|---------|-------|-------|---------|
+| Firefox | ✓ | ✓ | ✓ |
+| Chrome | ✓ | ✓ | ✓ |
+| Chromium | ✓ | ✓ | ✓ |
+| Brave | ✓ | ✓ | ✓ |
+| Edge | ✓ | ✓ | ✓ |
+| Safari | - | ✓ | - |
+| Vivaldi | ✓ | ✓ | ✓ |
+| Opera | ✓ | ✓ | ✓ |
+
+The tool checks multiple locations including:
+- Standard browser paths
+- Flatpak installations (Linux)
+- Snap installations (Linux)
+- Beta/Dev/Canary versions
+
+## Troubleshooting
+
+### "adult content detected, cookies not working"
+
+This error means your cookies are invalid or expired. Solutions:
+1. Log out and back into nexusmods.com in your browser
+2. Run `./nexus-mods-scraper extract` again
+3. Use `--interactive` mode if automatic extraction fails
+
+### "no valid cookies found in any browser"
+
+This means no NexusMods cookies were found. Solutions:
+1. Make sure you're logged into nexusmods.com in your browser
+2. Try a different browser
+3. Use `--interactive` mode to manually enter cookies
+4. Check `--show-all-browsers` to see which browsers were checked
+
+### Cookies not being detected
+
+If your browser isn't being detected:
+1. Use `--show-all-browsers` to see what's being checked
+2. Your browser might store cookies in a non-standard location
+3. Use `--interactive` mode as a workaround
+
+## Development
+
+### Running Tests
+
+Run all tests with coverage:
+
+```bash
+# Run all tests with coverage summary
+go test -cover ./...
+
+# Run tests with detailed coverage report
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+
+# Run tests with HTML coverage report
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out -o coverage.html
+
+# Run tests for a specific package
+go test -v ./internal/utils/extractors/...
+
+# Run a specific test
+go test -v -run TestExtractCookies ./cmd/cli/...
+```
+
+### Using Make
+
+```bash
+# Run tests with coverage
+make test
+
+# Generate HTML coverage report
+make coverage
+
+# Build the project
+make build
+
+# Run all checks (tidy, fmt, vet, test, build)
+make all
+
+# Clean build artifacts and coverage files
+make clean
+```
 
 ## Notes
 
-- You must have valid cookies in your `session-cookies.json` file before scraping.
-- Ensure your `session-cookies.json` file is placed in the correct directory or specify the path with the `--cookie-directory` flag.
-- Written using [go v1.23.2](https://go.dev/dl/)
+- Cookies must be valid before scraping adult-rated mods
+- Cookie files are stored in `~/.nexus-mods-scraper/data/` by default
+- Written using [Go v1.23.2](https://go.dev/dl/)
 
+## Main Packages Used
 
-## Main Packages used
+- [goquery](https://github.com/PuerkitoBio/goquery) - HTML parsing and scraping
+- [colorjson](https://github.com/TylerBrock/colorjson) - Pretty JSON output
+- [kooky](https://github.com/browserutils/kooky) - Browser cookie extraction
+- [yacspin](https://github.com/theckman/yacspin) - Terminal spinners
+- [cobra](https://github.com/spf13/cobra) - CLI framework
+- [version](https://go.szostok.io/version) - Version command
+- [termlink](https://github.com/savioxavier/termlink) - Clickable terminal links
+- [sqlite](https://modernc.org/sqlite) - Pure Go SQLite driver
 
-- [goquery](github.com/PuerkitoBio/goquery) - handles the heavy lifting for the scaping
-- [colorjson](github.com/TylerBrock/colorjson) - handles making things pretty
-- [kooky](github.com/browserutils/kooky) - handles the cookie extraction
-- [yacspin](github.com/theckman/yacspin) - spinners
-- [cobra](github.com/spf13/cobra) - cli
-- [version](go.szostok.io/version) - version command
-- [termlink](github.com/savioxavier/termlink) - handles ctrl+click on files
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
