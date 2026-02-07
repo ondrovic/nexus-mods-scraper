@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -12,8 +13,10 @@ import (
 
 	"github.com/browserutils/kooky"
 	_ "github.com/browserutils/kooky/browser/all"
+	"github.com/ondrovic/nexus-mods-scraper/internal/types"
 	"github.com/ondrovic/nexus-mods-scraper/internal/utils/exporters"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -220,8 +223,13 @@ func TestExtractCookies_NoCookieStores(t *testing.T) {
 	options.ValidCookies = []string{"session"}
 	options.OutputDirectory = "/tmp"
 	outputFilename = "session-cookies.json"
-	options.Interactive = false
-	options.NoValidate = true
+	// ExtractCookies reads from Viper, not options
+	viper.Set("interactive", false)
+	viper.Set("no-validate", true)
+	defer func() {
+		viper.Set("interactive", false)
+		viper.Set("no-validate", false)
+	}()
 
 	// Act
 	cmd := &cobra.Command{}
@@ -261,8 +269,13 @@ func TestExtractCookies_SaveError(t *testing.T) {
 	options.ValidCookies = []string{"session"}
 	options.OutputDirectory = "/nonexistent/readonly/path"
 	outputFilename = "session-cookies.json"
-	options.Interactive = false
-	options.NoValidate = true
+	// ExtractCookies reads from Viper, not options
+	viper.Set("interactive", false)
+	viper.Set("no-validate", true)
+	defer func() {
+		viper.Set("interactive", false)
+		viper.Set("no-validate", false)
+	}()
 
 	// Act
 	cmd := &cobra.Command{}
@@ -271,4 +284,81 @@ func TestExtractCookies_SaveError(t *testing.T) {
 
 	// Assert - should fail on save
 	assert.Error(t, err)
+}
+
+func TestDisplayBrowserReport(t *testing.T) {
+	result := &types.CookieExtractionResult{
+		BrowserStores: []types.BrowserCookieStore{
+			{BrowserName: "Chrome", Error: "no such file or directory"},
+			{BrowserName: "Firefox", Cookies: map[string]types.Cookie{}},
+			{
+				BrowserName: "Brave",
+				Cookies: map[string]types.Cookie{
+					"nexusmods_session": {Name: "nexusmods_session", Value: "x"},
+				},
+			},
+		},
+		SelectedBrowser: "Brave",
+		SelectedCookies: map[string]string{"nexusmods_session": "x"},
+	}
+	validCookies := []string{"nexusmods_session", "nexusmods_session_refresh"}
+
+	// Should not panic; exercises all branches (error, no cookies, cookies+selected)
+	displayBrowserReport(result, validCookies)
+}
+
+func TestDisplayBrowserReport_NoCookiesFound(t *testing.T) {
+	result := &types.CookieExtractionResult{
+		BrowserStores: []types.BrowserCookieStore{
+			{BrowserName: "Chrome", Error: "file not found"},
+			{BrowserName: "Firefox", Cookies: map[string]types.Cookie{}},
+		},
+		SelectedBrowser: "",
+	}
+	validCookies := []string{"nexusmods_session"}
+
+	// Exercises foundCount == 0 branch (tip message)
+	displayBrowserReport(result, validCookies)
+}
+
+func TestExtractCookies_WithValidationSuccess(t *testing.T) {
+	// Validation path: no-validate false, ValidateCookies succeeds
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`<html><body><div class="user-profile-menu-info"><h3>testuser</h3></div></body></html>`))
+	}))
+	defer server.Close()
+
+	mockStore := new(MockCookieStore)
+	cookie := &kooky.Cookie{
+		Cookie:  http.Cookie{Name: "session", Value: "1234", Domain: "example.com"},
+		Creation: time.Now(), Container: "MockBrowser",
+	}
+	mockStore.mockCookies = []*kooky.Cookie{cookie}
+	mockStore.On("Browser").Return("MockBrowser")
+	mockStore.On("Close").Return(nil)
+	mockStoreProvider := func() []kooky.CookieStore { return []kooky.CookieStore{mockStore} }
+
+	tempDir := t.TempDir()
+	options.BaseUrl = server.URL
+	options.ValidCookies = []string{"session"}
+	options.OutputDirectory = tempDir
+	outputFilename = "session-cookies.json"
+	viper.Set("base-url", server.URL)
+	viper.Set("valid-cookie-names", []string{"session"})
+	viper.Set("interactive", false)
+	viper.Set("no-validate", false)
+	defer func() {
+		viper.Set("no-validate", false)
+	}()
+
+	cmd := &cobra.Command{}
+	err := ExtractCookies(cmd, []string{}, mockStoreProvider)
+
+	assert.NoError(t, err)
+	mockStore.AssertExpectations(t)
+	path := filepath.Join(tempDir, "session-cookies.json")
+	content, err := os.ReadFile(path)
+	assert.NoError(t, err)
+	assert.Contains(t, string(content), "1234")
 }

@@ -32,9 +32,13 @@ jobs:
         run: go mod tidy
 
       - name: Run tests
-        run: go test -coverprofile=unit.coverage.out ./...
+        run: go test -coverprofile=unit.coverage.out -covermode=atomic ./...
         env:
           TERM: xterm
+
+      - name: Check coverage threshold
+        run: |
+          go tool cover -func=unit.coverage.out | grep '^total:' | awk '{gsub(/%/,""); pct=$NF; if (pct < 85) { print "::warning::Total coverage " pct "% is below 85% target"; exit 1 } else { print "Coverage " pct "% meets 85% target" }}'
 
       - name: Upload results to Codecov
         uses: codecov/codecov-action@v4

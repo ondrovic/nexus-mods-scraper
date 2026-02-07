@@ -703,7 +703,7 @@ func TestExtractUsername_UnknownUser(t *testing.T) {
 	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
 
 	result := extractUsername(doc)
-	assert.Equal(t, "Unknown User", result)
+	assert.Equal(t, "", result)
 }
 
 // Tests for browser_paths.go copyToTemp function

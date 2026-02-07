@@ -185,9 +185,12 @@ func GetCookieExpirationSummary(cookies map[string]types.Cookie) string {
 		return "No cookies"
 	}
 
-	// Find earliest expiration
+	// Find earliest expiration (skip session cookies with zero Expires)
 	var earliestExpiry time.Time
 	for _, cookie := range cookies {
+		if cookie.Expires.IsZero() {
+			continue
+		}
 		if earliestExpiry.IsZero() || cookie.Expires.Before(earliestExpiry) {
 			earliestExpiry = cookie.Expires
 		}

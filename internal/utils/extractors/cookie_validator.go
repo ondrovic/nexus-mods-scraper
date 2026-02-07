@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -11,7 +12,7 @@ import (
 // ValidateCookies tests if the provided cookies are valid by making a test request
 func ValidateCookies(baseURL string, cookies map[string]string) (bool, string, error) {
 	// Create HTTP client (no cookie jar - we'll set cookies manually like the scraper does)
-	client := &http.Client{}
+	client := &http.Client{Timeout: 10 * time.Second}
 
 	// Make a test request to a known mod page
 	testURL := baseURL + "/skyrim/mods/3863" // SkyUI - one of the most popular mods
@@ -86,7 +87,7 @@ func extractUsername(doc *goquery.Document) string {
 		return ""
 	}
 
-	return "Unknown User"
+	return ""
 }
 
 // ValidateCookiesQuick does a quick validation check without extracting username

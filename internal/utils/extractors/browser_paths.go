@@ -121,6 +121,9 @@ func readCookiesFromDB(bp browserPath, domain string, validCookieNames []string)
 		}
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return cookies, nil
 }
 
@@ -286,17 +289,8 @@ func getMacOSBrowserPaths(home string) []browserPath {
 		paths = append(paths, findChromiumProfiles(root, "edge")...)
 	}
 
-	// Safari (different structure)
-	safariCookies := filepath.Join(home, "Library", "Cookies", "Cookies.binarycookies")
-	if _, err := os.Stat(safariCookies); err == nil {
-		paths = append(paths, browserPath{
-			Browser:    "safari",
-			Profile:    "Default",
-			CookiePath: safariCookies,
-			IsDefault:  true,
-			IsChromium: false,
-		})
-	}
+	// Safari uses .binarycookies (proprietary format); readCookiesFromDB expects SQLite.
+	// Skipped until a dedicated Safari reader is implemented.
 
 	// Vivaldi
 	vivaldiRoots := []string{

@@ -61,7 +61,7 @@ The `extract` command automatically finds and extracts your NexusMods cookies fr
 
 #### Example Output
 
-```
+```text
 🔍 Searching for cookies in installed browsers...
 ═══════════════════════════════════════════════════════════
 ✓ firefox: found 2/2 cookies [nexusmods_session, nexusmods_session_refresh] (selected)
@@ -186,9 +186,11 @@ The cookie extractor supports these browsers across all platforms:
 | Chromium | ✓ | ✓ | ✓ |
 | Brave | ✓ | ✓ | ✓ |
 | Edge | ✓ | ✓ | ✓ |
-| Safari | - | ✓ | - |
+| Safari | - | *(see note)* | - |
 | Vivaldi | ✓ | ✓ | ✓ |
 | Opera | ✓ | ✓ | ✓ |
+
+*Safari on macOS uses Apple's `.binarycookies` format; the current implementation only reads SQLite-based cookie stores (see `readCookiesFromDB` in [internal/utils/extractors/browser_paths.go](internal/utils/extractors/browser_paths.go)). Safari cookie extraction is not supported until a dedicated reader is implemented.*
 
 The tool checks multiple locations including:
 - Standard browser paths
