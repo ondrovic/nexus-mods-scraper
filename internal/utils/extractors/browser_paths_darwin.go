@@ -34,24 +34,30 @@ func getMacOSBrowserPaths(home string) []browserPath {
 		paths = append(paths, findChromiumProfiles(cr.path, cr.browser)...)
 	}
 
-	// Brave
-	braveRoots := []string{
-		filepath.Join(appSupport, "BraveSoftware", "Brave-Browser"),
-		filepath.Join(appSupport, "BraveSoftware", "Brave-Browser-Beta"),
-		filepath.Join(appSupport, "BraveSoftware", "Brave-Browser-Nightly"),
+	// Brave (each variant gets a distinct label)
+	braveRoots := []struct {
+		path    string
+		browser string
+	}{
+		{filepath.Join(appSupport, "BraveSoftware", "Brave-Browser"), "brave"},
+		{filepath.Join(appSupport, "BraveSoftware", "Brave-Browser-Beta"), "brave-beta"},
+		{filepath.Join(appSupport, "BraveSoftware", "Brave-Browser-Nightly"), "brave-nightly"},
 	}
-	for _, root := range braveRoots {
-		paths = append(paths, findChromiumProfiles(root, "brave")...)
+	for _, br := range braveRoots {
+		paths = append(paths, findChromiumProfiles(br.path, br.browser)...)
 	}
 
-	// Edge
-	edgeRoots := []string{
-		filepath.Join(appSupport, "Microsoft Edge"),
-		filepath.Join(appSupport, "Microsoft Edge Beta"),
-		filepath.Join(appSupport, "Microsoft Edge Canary"),
+	// Edge (each variant gets a distinct browser name)
+	edgeRoots := []struct {
+		path    string
+		browser string
+	}{
+		{filepath.Join(appSupport, "Microsoft Edge"), "edge"},
+		{filepath.Join(appSupport, "Microsoft Edge Beta"), "edge-beta"},
+		{filepath.Join(appSupport, "Microsoft Edge Canary"), "edge-canary"},
 	}
-	for _, root := range edgeRoots {
-		paths = append(paths, findChromiumProfiles(root, "edge")...)
+	for _, er := range edgeRoots {
+		paths = append(paths, findChromiumProfiles(er.path, er.browser)...)
 	}
 
 	// Safari uses .binarycookies (proprietary format); readCookiesFromDB expects SQLite.

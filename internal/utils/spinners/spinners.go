@@ -15,8 +15,8 @@ var newSpinner = func(cfg yacspin.Config) (*yacspin.Spinner, error) {
 	return yacspin.New(cfg)
 }
 
-// exitOnError is called when spinner creation fails; tests may override to avoid os.Exit(1).
-var exitOnError = func(code int) { os.Exit(code) }
+// processExit is called to exit the process; used for both error (code 1) and clean/signal (code 0) exits. Tests may override to avoid os.Exit.
+var processExit = func(code int) { os.Exit(code) }
 
 // CreateSpinner initializes and returns a yacspin spinner with the provided
 // start and stop messages, characters, and failure configurations.
@@ -39,7 +39,7 @@ func CreateSpinner(startMessage, stopCharacter, stopMessage, stopFailCharacter, 
 	s, err := newSpinner(cfg)
 	if err != nil {
 		fmt.Printf("failed to create spinner: %v\n", err)
-		exitOnError(1)
+		processExit(1)
 		return nil
 	}
 
@@ -61,6 +61,6 @@ func stopOnSignal(spinner *yacspin.Spinner) {
 		// ignoring error intentionally
 		_ = spinner.StopFail()
 
-		exitOnError(0)
+		processExit(0)
 	}()
 }

@@ -115,30 +115,79 @@ func TestCreateSpinner_StopMessage(t *testing.T) {
 // TestCreateSpinner_CreationError covers the error path when spinner creation fails.
 func TestCreateSpinner_CreationError(t *testing.T) {
 	oldNewSpinner := newSpinner
-	oldExitOnError := exitOnError
+	oldProcessExit := processExit
 	defer func() {
 		newSpinner = oldNewSpinner
-		exitOnError = oldExitOnError
+		processExit = oldProcessExit
 	}()
 
 	newSpinner = func(_ yacspin.Config) (*yacspin.Spinner, error) {
 		return nil, errors.New("injected spinner failure")
 	}
-	exitOnError = func(code int) {
+	processExit = func(code int) {
 		if code != 1 {
 			t.Errorf("expected exit code 1, got %d", code)
 		}
-		panic("exitOnError")
+		panic("processExit")
 	}
 
 	defer func() {
-		if v := recover(); v != "exitOnError" {
-			t.Errorf("expected panic exitOnError, got %v", v)
+		if v := recover(); v != "processExit" {
+			t.Errorf("expected panic processExit, got %v", v)
 		}
 	}()
 
 	CreateSpinner("a", "b", "c", "d", "e")
 	t.Fatal("CreateSpinner should have panicked")
+}
+
+// TestCreateSpinner_CreationErrorReturnsNil covers the return nil path when creation fails
+// and processExit is a no-op (so the function returns instead of exiting).
+func TestCreateSpinner_CreationErrorReturnsNil(t *testing.T) {
+	oldNewSpinner := newSpinner
+	oldProcessExit := processExit
+	defer func() {
+		newSpinner = oldNewSpinner
+		processExit = oldProcessExit
+	}()
+
+	newSpinner = func(_ yacspin.Config) (*yacspin.Spinner, error) {
+		return nil, errors.New("injected spinner failure")
+	}
+	processExit = func(int) {} // no-op so CreateSpinner returns nil instead of exiting
+
+	s := CreateSpinner("a", "b", "c", "d", "e")
+	if s != nil {
+		t.Errorf("expected nil spinner when creation fails and processExit is no-op, got %v", s)
+	}
+}
+
+// TestCreateSpinner_CreationErrorCallsProcessExitWithOne covers the line processExit(1) when
+// spinner creation fails. We override processExit to record the code so the call is executed
+// and we avoid actually calling os.Exit(1).
+func TestCreateSpinner_CreationErrorCallsProcessExitWithOne(t *testing.T) {
+	oldNewSpinner := newSpinner
+	oldProcessExit := processExit
+	defer func() {
+		newSpinner = oldNewSpinner
+		processExit = oldProcessExit
+	}()
+
+	newSpinner = func(_ yacspin.Config) (*yacspin.Spinner, error) {
+		return nil, errors.New("injected spinner failure")
+	}
+	var exitCode int
+	processExit = func(code int) {
+		exitCode = code
+	}
+
+	s := CreateSpinner("a", "b", "c", "d", "e")
+	if s != nil {
+		t.Errorf("expected nil spinner when creation fails, got %v", s)
+	}
+	if exitCode != 1 {
+		t.Errorf("expected processExit(1) to be called, got exitCode %d", exitCode)
+	}
 }
 
 // TestCreateSpinner_ExitsOnCreationError runs CreateSpinner in a subprocess with

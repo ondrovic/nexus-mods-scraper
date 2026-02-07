@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -415,14 +418,14 @@ func TestScrapeMod_DisplayResults_FormatError(t *testing.T) {
 	defer func() { formatResultsFunc = orig }()
 
 	sc := types.CliFlags{
-		BaseUrl:         "https://somesite.com",
-		CookieDirectory:  tempDir,
-		CookieFile:       "session-cookies.json",
-		DisplayResults:  true,
-		GameName:        "game",
-		ModID:           1234,
-		Quiet:           false,
-		SaveResults:     false,
+		BaseUrl: "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile: "session-cookies.json",
+		DisplayResults: true,
+		GameName: "game",
+		ModID: 1234,
+		Quiet: false,
+		SaveResults: false,
 	}
 
 	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
@@ -494,6 +497,59 @@ func (failingSpinner) StopFail() error                       { return nil }
 func (failingSpinner) StopFailMessage(string)                {}
 func (failingSpinner) StopMessage(string)                    {}
 
+// spinnerStopFailErr returns error on StopFail() to cover stderr "spinner stop error" path.
+type spinnerStopFailErr struct{}
+
+func (spinnerStopFailErr) Start() error        { return nil }
+func (spinnerStopFailErr) Stop() error         { return nil }
+func (spinnerStopFailErr) StopFail() error     { return assert.AnError }
+func (spinnerStopFailErr) StopFailMessage(string) {}
+func (spinnerStopFailErr) StopMessage(string) {}
+
+// spinnerStopErr returns error on Stop() to cover stderr "spinner stop error" path.
+type spinnerStopErr struct{}
+
+func (spinnerStopErr) Start() error        { return nil }
+func (spinnerStopErr) Stop() error         { return assert.AnError }
+func (spinnerStopErr) StopFail() error     { return nil }
+func (spinnerStopErr) StopFailMessage(string) {}
+func (spinnerStopErr) StopMessage(string) {}
+
+// spinnerWithStopErr returns a fixed error from Stop(); used so coverage attributes the if stopErr body.
+type spinnerWithStopErr struct{ err error }
+
+func (s spinnerWithStopErr) Start() error        { return nil }
+func (s spinnerWithStopErr) Stop() error         { return s.err }
+func (s spinnerWithStopErr) StopFail() error      { return nil }
+func (s spinnerWithStopErr) StopFailMessage(string) {}
+func (s spinnerWithStopErr) StopMessage(string) {}
+
+// spinnerOK is a no-op spinner that never fails (for multi-step tests).
+type spinnerOK struct{}
+
+func (spinnerOK) Start() error        { return nil }
+func (spinnerOK) Stop() error         { return nil }
+func (spinnerOK) StopFail() error     { return nil }
+func (spinnerOK) StopFailMessage(string) {}
+func (spinnerOK) StopMessage(string) {}
+
+// captureStderr runs fn with os.Stderr redirected to a pipe, then returns the captured output.
+// Used to verify "spinner stop error" branches in scrapeMod are executed.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	old := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = old }()
+	fn()
+	w.Close()
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	r.Close()
+	return buf.String()
+}
+
 func TestScrapeMod_SpinnerStartFails(t *testing.T) {
 	tempDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
@@ -554,4 +610,353 @@ func TestScrapeMod_ScrapeSpinnerStartFails(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to start spinner")
+}
+
+// TestScrapeMod_HTTPClientInitError_StopFailReturnsError covers httpSpinner.StopFail() returning error (if stopErr body).
+func TestScrapeMod_HTTPClientInitError_StopFailReturnsError(t *testing.T) {
+	old := createSpinner
+	createSpinner = func(_, _, _, _, _ string) spinnerI { return spinnerStopFailErr{} }
+	defer func() { createSpinner = old }()
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: "/nonexistent/path",
+		CookieFile:      "nonexistent.json",
+		DisplayResults:  true,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     false,
+	}
+	var err error
+	stderr := captureStderr(t, func() { err = scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument) })
+	assert.Error(t, err)
+	assert.Contains(t, stderr, "spinner stop error")
+}
+
+// TestScrapeMod_HTTPClientInitSuccess_StopReturnsError covers httpSpinner.Stop() returning error (if stopErr body).
+func TestScrapeMod_HTTPClientInitSuccess_StopReturnsError(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
+
+	old := createSpinner
+	createSpinner = func(_, _, _, _, _ string) spinnerI { return spinnerStopErr{} }
+	defer func() { createSpinner = old }()
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  false,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     false,
+	}
+	var err error
+	stderr := captureStderr(t, func() { err = scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument) })
+	assert.NoError(t, err)
+	assert.Contains(t, stderr, "spinner stop error")
+}
+
+// TestScrapeMod_FetchModInfoError_StopFailReturnsError covers scrapeSpinner.StopFail() returning error (if stopErr body).
+func TestScrapeMod_FetchModInfoError_StopFailReturnsError(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
+
+	call := 0
+	old := createSpinner
+	createSpinner = func(_, _, _, _, _ string) spinnerI {
+		call++
+		if call == 1 {
+			return spinnerOK{}
+		}
+		return spinnerStopFailErr{}
+	}
+	defer func() { createSpinner = old }()
+
+	mockFetchError := func(baseUrl, game string, modId int64, concurrentFetch func(tasks ...func() error) error, fetchDocument func(targetURL string) (*goquery.Document, error)) (types.Results, error) {
+		return types.Results{}, assert.AnError
+	}
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  false,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     false,
+	}
+	var err error
+	stderr := captureStderr(t, func() { err = scrapeMod(sc, mockFetchError, mockFetchDocument) })
+	assert.Error(t, err)
+	assert.Contains(t, stderr, "spinner stop error")
+}
+
+// TestScrapeMod_ScrapeSuccess_StopReturnsError covers scrapeSpinner.Stop() returning error (if stopErr body).
+func TestScrapeMod_ScrapeSuccess_StopReturnsError(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
+
+	call := 0
+	old := createSpinner
+	createSpinner = func(_, _, _, _, _ string) spinnerI {
+		call++
+		if call == 1 {
+			return spinnerOK{}
+		}
+		return spinnerStopErr{}
+	}
+	defer func() { createSpinner = old }()
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  false,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     false,
+	}
+	var err error
+	stderr := captureStderr(t, func() { err = scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument) })
+	assert.NoError(t, err)
+	assert.Contains(t, stderr, "spinner stop error")
+}
+
+// TestScrapeMod_DisplaySpinnerStartFails covers displaySpinner.Start() failure (3rd spinner).
+func TestScrapeMod_DisplaySpinnerStartFails(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
+
+	call := 0
+	old := createSpinner
+	createSpinner = func(_, _, _, _, _ string) spinnerI {
+		call++
+		if call == 3 {
+			return failingSpinner{}
+		}
+		return spinnerOK{}
+	}
+	defer func() { createSpinner = old }()
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  true,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     false,
+	}
+	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to start display spinner")
+}
+
+// TestScrapeMod_DisplayResultsError_StopFailReturnsError covers displaySpinner.StopFail() returning error (if stopErr body).
+func TestScrapeMod_DisplayResultsError_StopFailReturnsError(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
+
+	orig := formatResultsFunc
+	formatResultsFunc = func(types.ModInfo) (string, error) { return "", assert.AnError }
+	defer func() { formatResultsFunc = orig }()
+
+	call := 0
+	old := createSpinner
+	createSpinner = func(_, _, _, _, _ string) spinnerI {
+		call++
+		if call == 3 {
+			return spinnerStopFailErr{}
+		}
+		return spinnerOK{}
+	}
+	defer func() { createSpinner = old }()
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  true,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     false,
+	}
+	var err error
+	stderr := captureStderr(t, func() { err = scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument) })
+	assert.Error(t, err)
+	assert.Contains(t, stderr, "spinner stop error")
+}
+
+// TestScrapeMod_DisplaySuccess_StopReturnsError covers displaySpinner.Stop() returning error (if stopErr body).
+func TestScrapeMod_DisplaySuccess_StopReturnsError(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
+
+	call := 0
+	old := createSpinner
+	createSpinner = func(_, _, _, _, _ string) spinnerI {
+		call++
+		if call == 3 {
+			return spinnerWithStopErr{err: errors.New("display stop")}
+		}
+		return spinnerOK{}
+	}
+	defer func() { createSpinner = old }()
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  true,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     false,
+	}
+	var err error
+	stderr := captureStderr(t, func() { err = scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument) })
+	assert.NoError(t, err)
+	assert.Contains(t, stderr, "spinner stop error")
+}
+
+// TestScrapeMod_SaveSpinnerStartFails covers saveSpinner.Start() failure (4th spinner).
+func TestScrapeMod_SaveSpinnerStartFails(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
+	outputDir := filepath.Join(tempDir, "output")
+	require.NoError(t, os.Mkdir(outputDir, 0755))
+
+	call := 0
+	old := createSpinner
+	createSpinner = func(_, _, _, _, _ string) spinnerI {
+		call++
+		if call == 4 {
+			return failingSpinner{}
+		}
+		return spinnerOK{}
+	}
+	defer func() { createSpinner = old }()
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  true,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     true,
+		OutputDirectory: outputDir,
+	}
+	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to start save spinner")
+}
+
+// TestScrapeMod_SaveError_StopFailReturnsError covers saveSpinner.StopFail() returning error (if stopErr body).
+func TestScrapeMod_SaveError_StopFailReturnsError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-based read-only dir is unreliable on Windows")
+	}
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
+	outputDir := filepath.Join(tempDir, "output")
+	// We create and chmod gameDir (not outputDir) because scrapeMod builds the save path as
+	// filepath.Join(OutputDirectory, strings.ToLower(GameName)); that nested dir is where writing fails.
+	gameDir := filepath.Join(outputDir, "game")
+	require.NoError(t, os.MkdirAll(gameDir, 0755))
+	require.NoError(t, os.Chmod(gameDir, 0o444)) // read-only so SaveModInfoToJson fails when writing the file
+	defer os.Chmod(gameDir, 0o755)
+
+	call := 0
+	old := createSpinner
+	createSpinner = func(_, _, _, _, _ string) spinnerI {
+		call++
+		// DisplayResults false + SaveResults true => 3 spinners only (HTTP, scrape, save)
+		if call == 3 {
+			return spinnerStopFailErr{}
+		}
+		return spinnerOK{}
+	}
+	defer func() { createSpinner = old }()
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  false,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     true,
+		OutputDirectory: outputDir,
+	}
+	var err error
+	stderr := captureStderr(t, func() { err = scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument) })
+	assert.Error(t, err)
+	assert.Contains(t, stderr, "spinner stop error")
+}
+
+// TestScrapeMod_SaveSuccess_NonQuiet covers the save success path with StopMessage and Stop (non-quiet).
+func TestScrapeMod_SaveSuccess_NonQuiet(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
+	outputDir := filepath.Join(tempDir, "output")
+	require.NoError(t, os.Mkdir(outputDir, 0755))
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  false,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     true,
+		OutputDirectory: outputDir,
+	}
+	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+	assert.NoError(t, err)
+}
+
+// TestScrapeMod_SaveSuccess_StopReturnsError covers saveSpinner.Stop() returning error (if stopErr body).
+func TestScrapeMod_SaveSuccess_StopReturnsError(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
+	outputDir := filepath.Join(tempDir, "output")
+	require.NoError(t, os.Mkdir(outputDir, 0755))
+
+	call := 0
+	old := createSpinner
+	createSpinner = func(_, _, _, _, _ string) spinnerI {
+		call++
+		if call == 3 {
+			return spinnerWithStopErr{err: errors.New("save stop")}
+		}
+		return spinnerOK{}
+	}
+	defer func() { createSpinner = old }()
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  false,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     true,
+		OutputDirectory: outputDir,
+	}
+	var err error
+	stderr := captureStderr(t, func() { err = scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument) })
+	assert.NoError(t, err)
+	assert.Contains(t, stderr, "spinner stop error")
 }

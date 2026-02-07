@@ -404,6 +404,178 @@ func TestExtractCookies_WithValidationSuccess(t *testing.T) {
 	assert.Contains(t, string(content), "1234")
 }
 
+// TestExtractCookies_EmptyTestPathUsesDefault covers the branch where cookie-validator-test-path is ""
+// and testPath is set to extractors.DefaultCookieValidatorTestPath.
+func TestExtractCookies_EmptyTestPathUsesDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`<html><body><div class="user-profile-menu-info"><h3>user</h3></div></body></html>`))
+	}))
+	defer server.Close()
+
+	mockStore := new(MockCookieStore)
+	mockStore.mockCookies = []*kooky.Cookie{
+		{Cookie: http.Cookie{Name: "session", Value: "v", Domain: "example.com"}, Creation: time.Now(), Container: "Mock"},
+	}
+	mockStore.On("Browser").Return("MockBrowser")
+	mockStore.On("Close").Return(nil)
+	mockStoreProvider := func() []kooky.CookieStore { return []kooky.CookieStore{mockStore} }
+
+	tempDir := t.TempDir()
+	origOptionsBaseUrl := options.BaseUrl
+	origOptionsOutputDirectory := options.OutputDirectory
+	origOutputFilename := outputFilename
+	origOptionsValidCookies := append([]string(nil), options.ValidCookies...)
+	options.BaseUrl = server.URL
+	options.OutputDirectory = tempDir
+	outputFilename = "session-cookies.json"
+	options.ValidCookies = []string{"session"}
+	origViperBaseURL := viper.Get("base-url")
+	origViperValidCookieNames := viper.Get("valid-cookie-names")
+	origViperNoValidate := viper.Get("no-validate")
+	origViperTestPath := viper.Get("cookie-validator-test-path")
+	viper.Set("base-url", server.URL)
+	viper.Set("valid-cookie-names", []string{"session"})
+	viper.Set("interactive", false)
+	viper.Set("no-validate", false)
+	viper.Set("cookie-validator-test-path", "") // force testPath == "" so default is used
+	defer func() {
+		options.BaseUrl = origOptionsBaseUrl
+		options.OutputDirectory = origOptionsOutputDirectory
+		outputFilename = origOutputFilename
+		options.ValidCookies = origOptionsValidCookies
+		viper.Set("base-url", origViperBaseURL)
+		viper.Set("valid-cookie-names", origViperValidCookieNames)
+		viper.Set("no-validate", origViperNoValidate)
+		viper.Set("cookie-validator-test-path", origViperTestPath)
+	}()
+
+	cmd := &cobra.Command{}
+	err := ExtractCookies(cmd, nil, mockStoreProvider, nil)
+	assert.NoError(t, err)
+	// Ensure default path was used (validation succeeded against server)
+	assert.FileExists(t, filepath.Join(tempDir, "session-cookies.json"))
+}
+
+// TestExtractCookies_NonEmptyTestPath covers the branch where cookie-validator-test-path is set
+// (testPath != "" so we do not assign DefaultCookieValidatorTestPath).
+func TestExtractCookies_NonEmptyTestPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`<html><body><div class="user-profile-menu-info"><h3>u</h3></div></body></html>`))
+	}))
+	defer server.Close()
+
+	mockStore := new(MockCookieStore)
+	mockStore.mockCookies = []*kooky.Cookie{
+		{Cookie: http.Cookie{Name: "session", Value: "v", Domain: "example.com"}, Creation: time.Now(), Container: "Mock"},
+	}
+	mockStore.On("Browser").Return("MockBrowser")
+	mockStore.On("Close").Return(nil)
+	mockStoreProvider := func() []kooky.CookieStore { return []kooky.CookieStore{mockStore} }
+
+	tempDir := t.TempDir()
+	origOptionsBaseUrl := options.BaseUrl
+	origOptionsOutputDirectory := options.OutputDirectory
+	origOutputFilename := outputFilename
+	origOptionsValidCookies := append([]string(nil), options.ValidCookies...)
+	options.BaseUrl = server.URL
+	options.OutputDirectory = tempDir
+	outputFilename = "session-cookies.json"
+	options.ValidCookies = []string{"session"}
+	origViperBaseURL := viper.Get("base-url")
+	origViperValidCookieNames := viper.Get("valid-cookie-names")
+	origViperNoValidate := viper.Get("no-validate")
+	origViperTestPath := viper.Get("cookie-validator-test-path")
+	viper.Set("base-url", server.URL)
+	viper.Set("valid-cookie-names", []string{"session"})
+	viper.Set("interactive", false)
+	viper.Set("no-validate", false)
+	viper.Set("cookie-validator-test-path", "/custom/validator/path")
+	defer func() {
+		options.BaseUrl = origOptionsBaseUrl
+		options.OutputDirectory = origOptionsOutputDirectory
+		outputFilename = origOutputFilename
+		options.ValidCookies = origOptionsValidCookies
+		viper.Set("base-url", origViperBaseURL)
+		viper.Set("valid-cookie-names", origViperValidCookieNames)
+		viper.Set("no-validate", origViperNoValidate)
+		viper.Set("cookie-validator-test-path", origViperTestPath)
+	}()
+
+	cmd := &cobra.Command{}
+	err := ExtractCookies(cmd, nil, mockStoreProvider, nil)
+	assert.NoError(t, err)
+	assert.FileExists(t, filepath.Join(tempDir, "session-cookies.json"))
+}
+
+// TestExtractCookies_BehaviorSelectMethodOnly covers behavior != nil with only SelectMethod set
+// (lines 93-96; InteractiveInput and ConfirmAction remain default).
+func TestExtractCookies_BehaviorSelectMethodOnly(t *testing.T) {
+	mockStore := new(MockCookieStore)
+	mockStore.mockCookies = []*kooky.Cookie{
+		{Cookie: http.Cookie{Name: "session", Value: "v", Domain: "example.com"}, Creation: time.Now(), Container: "Mock"},
+	}
+	mockStore.On("Browser").Return("MockBrowser")
+	mockStore.On("Close").Return(nil)
+	mockStoreProvider := func() []kooky.CookieStore { return []kooky.CookieStore{mockStore} }
+
+	tempDir := t.TempDir()
+	origInteractive := viper.Get("interactive")
+	origNoValidate := viper.Get("no-validate")
+	origValidNames := viper.Get("valid-cookie-names")
+	origOutputDirectory := options.OutputDirectory
+	origOutputFilename := outputFilename
+	viper.Set("interactive", true)
+	viper.Set("no-validate", true)
+	viper.Set("valid-cookie-names", []string{"session"})
+	options.OutputDirectory = tempDir
+	outputFilename = "session-cookies.json"
+	defer func() {
+		viper.Set("interactive", origInteractive)
+		viper.Set("no-validate", origNoValidate)
+		viper.Set("valid-cookie-names", origValidNames)
+		options.OutputDirectory = origOutputDirectory
+		outputFilename = origOutputFilename
+	}()
+
+	behavior := &ExtractBehavior{
+		SelectMethod: func() (string, error) { return "auto", nil },
+		// InteractiveInput and ConfirmAction left nil so defaults are used
+	}
+	cmd := &cobra.Command{}
+	err := ExtractCookies(cmd, nil, mockStoreProvider, behavior)
+	assert.NoError(t, err)
+	assert.FileExists(t, filepath.Join(tempDir, "session-cookies.json"))
+}
+
+// TestExtractCookies_Interactive_ManualInputError covers interactive + method "manual" when
+// interactiveInput returns an error (lines 103, 104, 106).
+func TestExtractCookies_Interactive_ManualInputError(t *testing.T) {
+	origInteractive := viper.Get("interactive")
+	origNoValidate := viper.Get("no-validate")
+	origValidNames := viper.Get("valid-cookie-names")
+	viper.Set("interactive", true)
+	viper.Set("no-validate", true)
+	viper.Set("valid-cookie-names", []string{"session"})
+	defer func() {
+		viper.Set("interactive", origInteractive)
+		viper.Set("no-validate", origNoValidate)
+		viper.Set("valid-cookie-names", origValidNames)
+	}()
+
+	behavior := &ExtractBehavior{
+		SelectMethod: func() (string, error) { return "manual", nil },
+		InteractiveInput: func([]string) (map[string]string, error) {
+			return nil, errors.New("manual input failed")
+		},
+	}
+	cmd := &cobra.Command{}
+	err := ExtractCookies(cmd, nil, func() []kooky.CookieStore { return nil }, behavior)
+	assert.Error(t, err)
+	assert.Equal(t, "manual input failed", err.Error())
+}
+
 func TestExtractCookies_ValidationFailure_NonInteractive(t *testing.T) {
 	// Validation fails (e.g. 401); non-interactive so we print warning and still try to save
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -672,6 +844,8 @@ func TestExtractCookies_Interactive_SelectMethodError(t *testing.T) {
 	originalNoValidate := viper.Get("no-validate")
 	originalValidNames := viper.Get("valid-cookie-names")
 	viper.Set("interactive", true)
+	viper.Set("no-validate", false)
+	viper.Set("valid-cookie-names", []string{})
 	defer func() {
 		viper.Set("interactive", originalInteractive)
 		viper.Set("no-validate", originalNoValidate)

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -882,6 +883,9 @@ func TestReadCookiesFromDB_Firefox_ZeroExpiry(t *testing.T) {
 }
 
 func TestFindAdditionalBrowserCookies_WithTempHome(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("TestFindAdditionalBrowserCookies_WithTempHome uses Linux path layout (.config/chromium); skip on " + runtime.GOOS)
+	}
 	home := t.TempDir()
 	configDir := filepath.Join(home, ".config", "chromium", "Default")
 	require.NoError(t, os.MkdirAll(configDir, 0755))
@@ -909,6 +913,9 @@ func TestFindAdditionalBrowserCookies_WithTempHome(t *testing.T) {
 // TestFindAdditionalBrowserCookies_ReadError covers the branch where a cookie file exists
 // but readCookiesFromDB fails (e.g. invalid SQLite); store is appended with Error set.
 func TestFindAdditionalBrowserCookies_ReadError(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-only test: uses .config/chromium and .config/google-chrome paths")
+	}
 	home := t.TempDir()
 	// Valid chromium DB
 	chromiumDir := filepath.Join(home, ".config", "chromium", "Default")
@@ -1062,6 +1069,32 @@ func TestFindFirefoxProfiles_WithProfilesIni(t *testing.T) {
 	assert.NotEmpty(t, paths)
 	assert.Equal(t, "firefox", paths[0].Browser)
 	assert.True(t, paths[0].IsDefault) // "default" directory name marks it as default
+}
+
+// TestFindFirefoxProfiles_RootNotDir covers the path where profiles.ini is missing
+// and ReadDir(root) fails (e.g. root is a file), returning empty paths.
+func TestFindFirefoxProfiles_RootNotDir(t *testing.T) {
+	f, err := os.CreateTemp("", "firefox-root-*")
+	require.NoError(t, err)
+	f.Close()
+	defer os.Remove(f.Name())
+
+	paths := findFirefoxProfiles(f.Name(), "firefox")
+	assert.Empty(t, paths)
+}
+
+// TestFindChromiumProfiles_ReadDirFails covers findChromiumProfiles when root is not a directory,
+// so ReadDir(root) returns an error (line 302-304).
+func TestFindChromiumProfiles_ReadDirFails(t *testing.T) {
+	// Root is a file so ReadDir returns error; Default/Cookies doesn't exist so we don't append it,
+	// then ReadDir(root) fails and we return only what we have (empty).
+	f, err := os.CreateTemp("", "chromium-root-*")
+	require.NoError(t, err)
+	f.Close()
+	defer os.Remove(f.Name())
+
+	paths := findChromiumProfiles(f.Name(), "chrome")
+	assert.Empty(t, paths)
 }
 
 // Additional tests for enhanced_cookie_extractor.go
