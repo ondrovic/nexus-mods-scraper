@@ -37,8 +37,9 @@ func TestValidateCookies_Non200(t *testing.T) {
 	assert.Contains(t, err.Error(), "401")
 }
 
-func TestValidateCookies_ParseErrorReturnsValidTrue(t *testing.T) {
-	// Body that causes goquery to fail or returns valid cookies anyway per comment in code
+func TestValidateCookies_NoUsernameFoundReturnsValidTrue(t *testing.T) {
+	// Verifies the success path where ValidateCookies gets a 200 response but no username
+	// is found in the page (e.g. minimal HTML without user-profile markup); valid=true, username="".
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("not valid html </"))

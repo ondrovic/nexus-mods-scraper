@@ -270,7 +270,7 @@ make clean
 
 - Cookies must be valid before scraping adult-rated mods
 - Cookie files are stored in `~/.nexus-mods-scraper/data/` by default
-- Written using [Go v1.23.2](https://go.dev/dl/)
+- Written using [Go v1.24.0](https://go.dev/dl/)
 
 ## Main Packages Used
 

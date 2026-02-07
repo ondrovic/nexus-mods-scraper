@@ -269,10 +269,12 @@ func TestExtractCookies_SaveError(t *testing.T) {
 	options.ValidCookies = []string{"session"}
 	options.OutputDirectory = "/nonexistent/readonly/path"
 	outputFilename = "session-cookies.json"
-	// ExtractCookies reads from Viper, not options
+	// ExtractCookies reads from Viper, not options; set valid-cookie-names so extraction succeeds and we hit the save-error path
+	viper.Set("valid-cookie-names", []string{"session"})
 	viper.Set("interactive", false)
 	viper.Set("no-validate", true)
 	defer func() {
+		viper.Set("valid-cookie-names", nil)
 		viper.Set("interactive", false)
 		viper.Set("no-validate", false)
 	}()
@@ -344,12 +346,17 @@ func TestExtractCookies_WithValidationSuccess(t *testing.T) {
 	options.ValidCookies = []string{"session"}
 	options.OutputDirectory = tempDir
 	outputFilename = "session-cookies.json"
+	origBaseURL := viper.Get("base-url")
+	origValidCookieNames := viper.Get("valid-cookie-names")
+	origNoValidate := viper.Get("no-validate")
 	viper.Set("base-url", server.URL)
 	viper.Set("valid-cookie-names", []string{"session"})
 	viper.Set("interactive", false)
 	viper.Set("no-validate", false)
 	defer func() {
-		viper.Set("no-validate", false)
+		viper.Set("base-url", origBaseURL)
+		viper.Set("valid-cookie-names", origValidCookieNames)
+		viper.Set("no-validate", origNoValidate)
 	}()
 
 	cmd := &cobra.Command{}
