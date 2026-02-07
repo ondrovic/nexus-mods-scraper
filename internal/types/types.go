@@ -9,19 +9,20 @@ import (
 // the base URL, cookie directory, cookie file, display and save result flags, game name,
 // mod ID, output directory, and valid cookies for the operation.
 type CliFlags struct {
-	BaseUrl          string
-	CookieDirectory  string
-	CookieFile       string
-	DisplayResults   bool
-	GameName         string
-	Interactive      bool
-	ModID            int64
-	NoValidate       bool
-	OutputDirectory  string
-	Quiet            bool
-	SaveResults      bool
-	ShowAllBrowsers  bool
-	ValidCookies     []string
+	BaseUrl                   string
+	CookieDirectory           string
+	CookieFile                string
+	CookieValidatorTestPath   string // Path for cookie validation request (default: "/"); config key: cookie-validator-test-path
+	DisplayResults            bool
+	GameName                  string
+	Interactive               bool
+	ModID                     int64
+	NoValidate                bool
+	OutputDirectory           string
+	Quiet                     bool
+	SaveResults               bool
+	ShowAllBrowsers           bool
+	ValidCookies              []string
 }
 
 // NewScraper initializes and returns a new instance of CliFlags with default values.

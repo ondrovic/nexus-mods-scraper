@@ -1,7 +1,9 @@
 package extractors
 
 import (
+	"bufio"
 	"database/sql"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -127,25 +129,29 @@ func readCookiesFromDB(bp browserPath, domain string, validCookieNames []string)
 	return cookies, nil
 }
 
-// copyToTemp copies a file to a temporary location
+// copyToTemp copies a file to a temporary location by streaming.
 func copyToTemp(src string) (string, error) {
-	data, err := os.ReadFile(src)
+	srcFile, err := os.Open(src)
 	if err != nil {
 		return "", err
 	}
+	defer srcFile.Close()
 
 	tempFile, err := os.CreateTemp("", "cookies-*.db")
 	if err != nil {
 		return "", err
 	}
+	defer tempFile.Close()
 
-	if _, err := tempFile.Write(data); err != nil {
-		tempFile.Close()
+	bw := bufio.NewWriter(tempFile)
+	if _, err := io.Copy(bw, srcFile); err != nil {
 		os.Remove(tempFile.Name())
 		return "", err
 	}
-
-	tempFile.Close()
+	if err := bw.Flush(); err != nil {
+		os.Remove(tempFile.Name())
+		return "", err
+	}
 	return tempFile.Name(), nil
 }
 
@@ -175,11 +181,12 @@ func getBrowserPaths(home string) []browserPath {
 func getLinuxBrowserPaths(home string) []browserPath {
 	paths := []browserPath{}
 
-	// Firefox - additional locations
+	// Firefox - standard and alternative locations (native, .config, Flatpak)
 	firefoxRoots := []string{
-		filepath.Join(home, ".config", "mozilla", "firefox"),
-		filepath.Join(home, ".var", "app", "org.mozilla.firefox", ".mozilla", "firefox"),
-		filepath.Join(home, ".var", "app", "org.mozilla.Firefox", ".mozilla", "firefox"),
+		filepath.Join(home, ".mozilla", "firefox"),                                           // standard Linux profile dir
+		filepath.Join(home, ".config", "mozilla", "firefox"),                                  // alternative config location
+		filepath.Join(home, ".var", "app", "org.mozilla.firefox", ".mozilla", "firefox"),      // Flatpak (lowercase)
+		filepath.Join(home, ".var", "app", "org.mozilla.Firefox", ".mozilla", "firefox"),      // Flatpak (PascalCase)
 	}
 	for _, root := range firefoxRoots {
 		paths = append(paths, findFirefoxProfiles(root, "firefox")...)

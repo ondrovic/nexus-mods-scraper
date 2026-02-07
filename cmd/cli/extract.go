@@ -62,6 +62,7 @@ func initExtractFlags(cmd *cobra.Command) {
 	cli.RegisterFlag(cmd, "interactive", "i", false, "Enable interactive mode for manual cookie entry", &options.Interactive)
 	cli.RegisterFlag(cmd, "no-validate", "n", false, "Skip cookie validation", &options.NoValidate)
 	cli.RegisterFlag(cmd, "show-all-browsers", "a", false, "Show all browsers checked (including not installed)", &options.ShowAllBrowsers)
+	cli.RegisterFlag(cmd, "cookie-validator-test-path", "", extractors.DefaultCookieValidatorTestPath, "Path used for cookie validation request", &options.CookieValidatorTestPath)
 }
 
 // ExtractCookies extracts cookies from the specified domain using the valid cookie names,
@@ -74,6 +75,10 @@ func ExtractCookies(cmd *cobra.Command, args []string, storeProvider func() []ko
 	noValidate := viper.GetBool("no-validate")
 	showAllBrowsers := viper.GetBool("show-all-browsers")
 	baseURL := viper.GetString("base-url")
+	testPath := viper.GetString("cookie-validator-test-path")
+	if testPath == "" {
+		testPath = extractors.DefaultCookieValidatorTestPath
+	}
 
 	var finalCookies map[string]string
 	var err error
@@ -116,9 +121,13 @@ func ExtractCookies(cmd *cobra.Command, args []string, storeProvider func() []ko
 	// Validate cookies if not disabled
 	if !noValidate {
 		fmt.Println("\n🔍 Validating cookies...")
-		isValid, username, err := extractors.ValidateCookies(baseURL, finalCookies)
+		isValid, username, err := extractors.ValidateCookies(baseURL, testPath, finalCookies)
 		if err != nil || !isValid {
-			fmt.Printf("⚠ Warning: Cookie validation failed: %v\n", err)
+			if err != nil {
+				fmt.Printf("⚠ Warning: Cookie validation failed: %v\n", err)
+			} else {
+				fmt.Println("⚠ Warning: Cookie validation failed")
+			}
 			if interactive && !extractors.ConfirmAction("Continue anyway?") {
 				return fmt.Errorf("cookie validation failed")
 			}

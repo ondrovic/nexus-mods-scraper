@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/savioxavier/termlink"
@@ -33,6 +34,8 @@ var (
 	// fetchDocumentFunc is a variable that holds a reference to the function used for
 	// fetching HTML documents from a given URL.
 	fetchDocumentFunc = fetchers.FetchDocument
+	// formatResultsFunc is used when displaying results; may be overridden in tests.
+	formatResultsFunc = formatters.FormatResultsAsJson
 )
 
 // init initializes the scrape command with usage, description, and argument validation.
@@ -154,15 +157,18 @@ func scrapeMod(
 			if err := displaySpinner.Start(); err != nil {
 				return fmt.Errorf("failed to start display spinner: %w", err)
 			}
-			displaySpinner.Stop() // Temporarily stop spinner for clean output
-		}
-
-		// Print the results
-		if err := exporters.DisplayResults(sc, results, formatters.FormatResultsAsJson); err != nil {
-			if !sc.Quiet {
-				fmt.Println("Error displaying results:", err)
+			if err := exporters.DisplayResults(sc, results, formatResultsFunc); err != nil {
+				fmt.Fprintln(os.Stderr, "Error displaying results:", err)
+				displaySpinner.StopFailMessage("Failed to display results")
+				displaySpinner.StopFail()
+				return err
 			}
-			return err
+			displaySpinner.Stop()
+		} else {
+			if err := exporters.DisplayResults(sc, results, formatResultsFunc); err != nil {
+				fmt.Fprintln(os.Stderr, "Error displaying results:", err)
+				return err
+			}
 		}
 	}
 

@@ -344,3 +344,71 @@ func TestScrapeMod_HTTPClientInitError_QuietMode(t *testing.T) {
 	// Assert - should return an error from HTTP client init
 	assert.Error(t, err)
 }
+
+func TestScrapeMod_HTTPClientInitError_NonQuietMode(t *testing.T) {
+	// Same as above but Quiet: false to cover spinner StopFail path
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: "/nonexistent/path",
+		CookieFile:      "nonexistent.json",
+		DisplayResults:  true,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     false,
+	}
+
+	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+
+	assert.Error(t, err)
+}
+
+func TestScrapeMod_DisplayResults_FormatError(t *testing.T) {
+	tempDir := t.TempDir()
+	cookieFile := filepath.Join(tempDir, "session-cookies.json")
+	require.NoError(t, os.WriteFile(cookieFile, []byte("{}"), 0644))
+
+	orig := formatResultsFunc
+	formatResultsFunc = func(types.ModInfo) (string, error) {
+		return "", assert.AnError
+	}
+	defer func() { formatResultsFunc = orig }()
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory:  tempDir,
+		CookieFile:       "session-cookies.json",
+		DisplayResults:  true,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           false,
+		SaveResults:     false,
+	}
+
+	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+
+	assert.Error(t, err)
+}
+
+func TestScrapeMod_SaveResults_EnsureDirExistsFails(t *testing.T) {
+	// OutputDirectory under a non-directory path so EnsureDirExists fails (covers that error return)
+	tempDir := t.TempDir()
+	cookieFile := filepath.Join(tempDir, "session-cookies.json")
+	require.NoError(t, os.WriteFile(cookieFile, []byte("{}"), 0644))
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  false,
+		GameName:        "game",
+		ModID:           1234,
+		Quiet:           true,
+		SaveResults:     true,
+		OutputDirectory: "/dev/null", // not a directory; EnsureDirExists will fail
+	}
+
+	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+
+	assert.Error(t, err)
+}

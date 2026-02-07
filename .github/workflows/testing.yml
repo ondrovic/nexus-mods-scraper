@@ -38,7 +38,22 @@ jobs:
 
       - name: Check coverage threshold
         run: |
-          go tool cover -func=unit.coverage.out | grep '^total:' | awk '{gsub(/%/,""); pct=$NF; if (pct < 85) { print "::warning::Total coverage " pct "% is below 85% target"; exit 1 } else { print "Coverage " pct "% meets 85% target" }}'
+          if [ ! -f unit.coverage.out ]; then
+            echo "::error::Coverage file unit.coverage.out is missing"
+            exit 1
+          fi
+          total_line=$(go tool cover -func=unit.coverage.out | grep '^total:' || true)
+          if [ -z "$total_line" ]; then
+            echo "::error::Coverage file unit.coverage.out is malformed (no total: line)"
+            exit 1
+          fi
+          pct=$(echo "$total_line" | awk '{gsub(/%/,""); print $NF}')
+          if awk -v pct="$pct" 'BEGIN { exit (pct+0 >= 85) ? 0 : 1 }'; then
+            echo "Coverage ${pct}% meets 85% target"
+          else
+            echo "::error::Total coverage ${pct}% is below 85% target"
+            exit 1
+          fi
 
       - name: Upload results to Codecov
         uses: codecov/codecov-action@v4

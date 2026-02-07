@@ -3,28 +3,46 @@ package extractors
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
 )
 
-// ValidateCookies tests if the provided cookies are valid by making a test request
-func ValidateCookies(baseURL string, cookies map[string]string) (bool, string, error) {
+// DefaultCookieValidatorTestPath is the path used for cookie validation when none is configured.
+// Using the site root is stable and avoids depending on a specific mod page.
+const DefaultCookieValidatorTestPath = "/"
+
+// ValidateCookies tests if the provided cookies are valid by making a test request to testPath
+// on the given baseURL. If testPath is empty, DefaultCookieValidatorTestPath ("/") is used.
+// testPath should be a path (e.g. "/" or "/skyrim/mods/3863") and is read from config/env by callers.
+func ValidateCookies(baseURL, testPath string, cookies map[string]string) (bool, string, error) {
 	// Create HTTP client (no cookie jar - we'll set cookies manually like the scraper does)
 	client := &http.Client{Timeout: 10 * time.Second}
 
-	// Make a test request to a known mod page
-	testURL := baseURL + "/skyrim/mods/3863" // SkyUI - one of the most popular mods
+	if testPath == "" {
+		testPath = DefaultCookieValidatorTestPath
+	}
+	if !strings.HasPrefix(testPath, "/") {
+		testPath = "/" + testPath
+	}
+	testURL := strings.TrimSuffix(baseURL, "/") + testPath
 	req, err := http.NewRequest("GET", testURL, nil)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Build the Cookie header manually (same as scraper)
+	// Build the Cookie header manually (same as scraper), using http.Cookie for proper quoting/escaping.
+	// Iterate over sorted keys so the Cookie header order is deterministic.
+	names := make([]string, 0, len(cookies))
+	for name := range cookies {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 	var cookieHeader []string
-	for name, value := range cookies {
-		cookieHeader = append(cookieHeader, fmt.Sprintf("%s=%s", name, value))
+	for _, name := range names {
+		cookieHeader = append(cookieHeader, (&http.Cookie{Name: name, Value: cookies[name]}).String())
 	}
 	req.Header.Set("Cookie", strings.Join(cookieHeader, "; "))
 
@@ -90,8 +108,9 @@ func extractUsername(doc *goquery.Document) string {
 	return ""
 }
 
-// ValidateCookiesQuick does a quick validation check without extracting username
-func ValidateCookiesQuick(baseURL string, cookies map[string]string) bool {
-	valid, _, err := ValidateCookies(baseURL, cookies)
+// ValidateCookiesQuick does a quick validation check without extracting username.
+// testPath follows the same rules as ValidateCookies (empty means site root).
+func ValidateCookiesQuick(baseURL, testPath string, cookies map[string]string) bool {
+	valid, _, err := ValidateCookies(baseURL, testPath, cookies)
 	return valid && err == nil
 }

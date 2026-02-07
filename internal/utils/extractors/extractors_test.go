@@ -37,7 +37,15 @@ func (m *MockCookieStore) Cookies(u *url.URL) []*http.Cookie {
 // Mock the SubJar method (kooky v0.2.4 API with context)
 func (m *MockCookieStore) SubJar(ctx context.Context, filters ...kooky.Filter) (http.CookieJar, error) {
 	args := m.Called(ctx, filters)
-	return args.Get(0).(http.CookieJar), args.Error(1)
+	v := args.Get(0)
+	if v == nil {
+		return nil, args.Error(1)
+	}
+	jar, ok := v.(http.CookieJar)
+	if !ok {
+		return nil, args.Error(1)
+	}
+	return jar, args.Error(1)
 }
 
 // Mock the TraverseCookies method (kooky v0.2.4 API)
@@ -52,10 +60,18 @@ func (m *MockCookieStore) TraverseCookies(filters ...kooky.Filter) kooky.CookieS
 	})
 }
 
-// Mock the ReadCookies method
+// Mock the ReadCookies method (nil-safe like SubJar)
 func (m *MockCookieStore) ReadCookies(filters ...kooky.Filter) ([]*kooky.Cookie, error) {
 	args := m.Called(filters)
-	return args.Get(0).([]*kooky.Cookie), args.Error(1)
+	v := args.Get(0)
+	if v == nil {
+		return nil, args.Error(1)
+	}
+	cookies, ok := v.([]*kooky.Cookie)
+	if !ok {
+		return nil, args.Error(1)
+	}
+	return cookies, args.Error(1)
 }
 
 // Mock the Browser method

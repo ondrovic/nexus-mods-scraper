@@ -87,6 +87,7 @@ Extracted cookies saved to ~/.nexus-mods-scraper/data/session-cookies.json
 | `--interactive` | `-i` | `false` | Enable interactive mode for manual entry |
 | `--no-validate` | `-n` | `false` | Skip cookie validation |
 | `--show-all-browsers` | `-a` | `false` | Show all browsers checked (for debugging) |
+| `--cookie-validator-test-path` | | `/` | Path used for cookie validation request (default: site root; config key: `cookie-validator-test-path`) |
 
 #### Interactive Mode
 

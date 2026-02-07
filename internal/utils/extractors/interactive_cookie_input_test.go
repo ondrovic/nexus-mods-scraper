@@ -2,6 +2,7 @@ package extractors
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 
@@ -24,6 +25,13 @@ func TestInteractiveCookieInputWithIO_EmptyValueError(t *testing.T) {
 	_, err := interactiveCookieInputWithIO(in, &out, []string{"cookie1"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot be empty")
+}
+
+func TestInteractiveCookieInputWithIO_ReadError(t *testing.T) {
+	var out bytes.Buffer
+	_, err := interactiveCookieInputWithIO(&errReader{}, &out, []string{"cookie1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read input")
 }
 
 func TestPromptForCookieSelectionWithIO_NoStores(t *testing.T) {
@@ -77,6 +85,25 @@ func TestConfirmActionWithIO_No(t *testing.T) {
 	assert.False(t, confirmActionWithIO(strings.NewReader("other\n"), &bytes.Buffer{}, "Continue?"))
 }
 
+// errReader returns an error on Read to cover the confirmActionWithIO read-error path
+type errReader struct{}
+
+func (errReader) Read(_ []byte) (int, error) {
+	return 0, assert.AnError
+}
+
+func TestConfirmActionWithIO_ReadError(t *testing.T) {
+	assert.False(t, confirmActionWithIO(&errReader{}, &bytes.Buffer{}, "Continue?"))
+}
+
+func TestPromptForCookieSelectionWithIO_ReadError(t *testing.T) {
+	var out bytes.Buffer
+	idx, err := promptForCookieSelectionWithIO(&errReader{}, &out, []string{"Chrome", "Firefox"})
+	assert.Error(t, err)
+	assert.Equal(t, -1, idx)
+	assert.Contains(t, err.Error(), "failed to read input")
+}
+
 func TestSelectExtractionMethodWithIO_Auto(t *testing.T) {
 	method, err := selectExtractionMethodWithIO(strings.NewReader("1\n"), &bytes.Buffer{})
 	require.NoError(t, err)
@@ -97,4 +124,69 @@ func TestSelectExtractionMethodWithIO_Invalid(t *testing.T) {
 	_, err := selectExtractionMethodWithIO(strings.NewReader("3\n"), &bytes.Buffer{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid selection")
+}
+
+func TestSelectExtractionMethodWithIO_ReadError(t *testing.T) {
+	_, err := selectExtractionMethodWithIO(&errReader{}, &bytes.Buffer{})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read input")
+}
+
+// Tests for public wrappers that use os.Stdin/Stdout (cover the 0% wrapper functions)
+func TestInteractiveCookieInput_WithPipedStdin(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	oldStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = oldStdin }()
+	go func() {
+		_, _ = w.WriteString("v1\nv2\n")
+		_ = w.Close()
+	}()
+	cookies, err := InteractiveCookieInput([]string{"c1", "c2"})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"c1": "v1", "c2": "v2"}, cookies)
+}
+
+func TestPromptForCookieSelection_WithPipedStdin(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	oldStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = oldStdin }()
+	go func() {
+		_, _ = w.WriteString("2\n")
+		_ = w.Close()
+	}()
+	idx, err := PromptForCookieSelection([]string{"Chrome", "Firefox"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, idx)
+}
+
+func TestConfirmAction_WithPipedStdin(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	oldStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = oldStdin }()
+	go func() {
+		_, _ = w.WriteString("y\n")
+		_ = w.Close()
+	}()
+	assert.True(t, ConfirmAction("Continue?"))
+}
+
+func TestSelectExtractionMethod_WithPipedStdin(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	oldStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = oldStdin }()
+	go func() {
+		_, _ = w.WriteString("2\n")
+		_ = w.Close()
+	}()
+	method, err := SelectExtractionMethod()
+	require.NoError(t, err)
+	assert.Equal(t, "manual", method)
 }
