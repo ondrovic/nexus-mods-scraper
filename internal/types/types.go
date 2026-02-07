@@ -9,15 +9,20 @@ import (
 // the base URL, cookie directory, cookie file, display and save result flags, game name,
 // mod ID, output directory, and valid cookies for the operation.
 type CliFlags struct {
-	BaseUrl         string
-	CookieDirectory string
-	CookieFile      string
-	DisplayResults  bool
-	GameName        string
-	ModID           int64
-	OutputDirectory string
-	SaveResults     bool
-	ValidCookies    []string
+	BaseUrl                   string
+	CookieDirectory           string
+	CookieFile                string
+	CookieValidatorTestPath   string // Path for cookie validation request (default: "/"); config key: cookie-validator-test-path
+	DisplayResults            bool
+	GameName                  string
+	Interactive               bool
+	ModID                     int64
+	NoValidate                bool
+	OutputDirectory           string
+	Quiet                     bool
+	SaveResults               bool
+	ShowAllBrowsers           bool
+	ValidCookies              []string
 }
 
 // NewScraper initializes and returns a new instance of CliFlags with default values.
@@ -90,3 +95,31 @@ type File struct {
 }
 
 // end nexus mods related.
+
+// cookie extraction related.
+
+// BrowserCookieStore represents cookies found in a specific browser with metadata
+type BrowserCookieStore struct {
+	BrowserName string            `json:"browserName"`
+	Cookies     map[string]Cookie `json:"cookies"`
+	Error       string            `json:"error,omitempty"`
+}
+
+// Cookie represents a single cookie with its value and metadata
+type Cookie struct {
+	Name    string    `json:"name"`
+	Value   string    `json:"value"`
+	Expires time.Time `json:"expires"`
+	Domain  string    `json:"domain"`
+}
+
+// CookieExtractionResult contains the results of cookie extraction from all browsers
+type CookieExtractionResult struct {
+	BrowserStores   []BrowserCookieStore `json:"browserStores"`
+	SelectedBrowser string               `json:"selectedBrowser"`
+	SelectedCookies map[string]string    `json:"selectedCookies"`
+	IsValid         bool                 `json:"isValid"`
+	Username        string               `json:"username,omitempty"`
+}
+
+// end cookie extraction related.

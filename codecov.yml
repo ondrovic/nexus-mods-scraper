@@ -2,10 +2,10 @@ coverage:
   status:
     project:
       default:
-        target: "70%"
+        target: "85%"
         threshold: "1%"
         base: auto
-  range: 50..70
+  range: 50..85
   round: down
   precision: 2
 github_checks: 

@@ -65,23 +65,48 @@ func setCookiesFromFile(domain, dir, filename string) error {
 		return fmt.Errorf("error decoding JSON: %w", err)
 	}
 
-	// Create cookies and set them
+	// Parse domain URL to extract host; normalize if no scheme so Hostname() is non-empty
+	parsedDomain, err := url.Parse(domain)
+	if err != nil {
+		return fmt.Errorf("error parsing domain for cookies: %w", err)
+	}
+	if parsedDomain.Hostname() == "" {
+		parsedDomain, err = url.Parse("https://" + domain)
+		if err != nil {
+			return fmt.Errorf("error parsing domain for cookies: %w", err)
+		}
+		if parsedDomain.Hostname() == "" {
+			return fmt.Errorf("invalid domain for cookies: could not extract hostname from %q (use a valid hostname or URL with scheme)", domain)
+		}
+	}
+
+	// Create cookies and set them with proper attributes
 	var cookies []*http.Cookie
 	for name, value := range cookiesMap {
 		cookies = append(cookies, &http.Cookie{
-			Name:  name,
-			Value: value,
+			Name:     name,
+			Value:    value,
+			Path:     "/",
+			Domain:   parsedDomain.Hostname(),
+			Secure:   true,
+			HttpOnly: true,
+			SameSite: http.SameSiteNoneMode,
 		})
 	}
 
 	// Set cookies for the domain
-	if jar, ok := Client.(*http.Client).Jar.(*cookiejar.Jar); ok {
-		u, err := url.Parse(domain)
-		if err != nil {
-			return fmt.Errorf("error parsing domain: %w", err)
-		}
-		jar.SetCookies(u, cookies) // Cookies are set in the jar
+	httpClient, ok := Client.(*http.Client)
+	if !ok {
+		return fmt.Errorf("client is not *http.Client: cookies not applied for domain %q", parsedDomain.Hostname())
 	}
+	if httpClient.Jar == nil {
+		return fmt.Errorf("cookie jar is nil: cookies not applied for domain %q", parsedDomain.Hostname())
+	}
+	jar, ok := httpClient.Jar.(*cookiejar.Jar)
+	if !ok {
+		return fmt.Errorf("cookie jar is not *cookiejar.Jar: cookies not applied for domain %q", parsedDomain.Hostname())
+	}
+	jar.SetCookies(parsedDomain, cookies)
 
 	return nil
 }

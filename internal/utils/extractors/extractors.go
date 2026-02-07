@@ -14,18 +14,31 @@ import (
 	_ "github.com/browserutils/kooky/browser/all"
 )
 
-// IsAdultContent checks if the mod identified by modId is marked as "Adult content"
-// in the goquery document. It looks for an h3 tag with the corresponding modId
-// and returns true if the text matches "Adult content".
-// AKA your not logged in.
+// IsAdultContent checks if the page is showing an adult content warning
+// or login requirement instead of the actual mod content.
+// This happens when cookies are missing/invalid for adult-rated mods.
 func IsAdultContent(doc *goquery.Document, modId int64) bool {
-	// Format the ID of the h3 tag based on the modId
+	// Check for the new page structure (login required for adult content)
+	h1Text := strings.TrimSpace(doc.Find("h1").First().Text())
+	if h1Text == "Please log in or register" {
+		return true
+	}
+
+	// Check for "Adult content disabled" message
+	found := false
+	doc.Find("h3").Each(func(i int, s *goquery.Selection) {
+		text := strings.TrimSpace(s.Text())
+		if text == "Adult content disabled" {
+			found = true
+		}
+	})
+	if found {
+		return true
+	}
+
+	// Legacy check: Format the ID of the h3 tag based on the modId
 	titleId := fmt.Sprintf("#%d-title", modId)
-
-	// Search for the h3 tag with the constructed ID
 	titleTag := doc.Find(titleId)
-
-	// Check if the tag exists and has the correct text
 	if titleTag.Length() > 0 {
 		titleText := titleTag.Text()
 		return titleText == "Adult content"
@@ -58,14 +71,9 @@ func CookieExtractor(domain string, validCookies []string, storeProvider func() 
 			kooky.DomainContains(domain),
 		}
 
-		// Read cookies based on the filters
-		storeCookies, err := store.ReadCookies(filters...)
-		if err != nil {
-			continue
-		}
-
-		// Filter and store valid cookies in the map
-		for _, cookie := range storeCookies {
+		// Read cookies using new API (OnlyCookies() skips errors)
+		for cookie := range store.TraverseCookies(filters...).OnlyCookies() {
+			// Filter and store valid cookies in the map
 			for _, valid := range validCookies {
 				if cookie.Name == valid {
 					cookies[cookie.Name] = cookie.Value

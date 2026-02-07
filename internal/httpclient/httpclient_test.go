@@ -150,3 +150,17 @@ func TestSetCookiesFromFile_JSONError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "error decoding JSON")
 }
+
+func TestInitClient_InvalidDomain(t *testing.T) {
+	dir := t.TempDir()
+	filename := "cookies.json"
+	file, err := os.Create(filepath.Join(dir, filename))
+	assert.NoError(t, err)
+	err = json.NewEncoder(file).Encode(map[string]string{"session": "1234"})
+	assert.NoError(t, err)
+	file.Close()
+
+	err = InitClient("://invalid-domain", dir, filename)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing domain")
+}

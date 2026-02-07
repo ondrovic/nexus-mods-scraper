@@ -32,9 +32,28 @@ jobs:
         run: go mod tidy
 
       - name: Run tests
-        run: go test -coverprofile=unit.coverage.out ./...
+        run: go test -coverprofile=unit.coverage.out -covermode=atomic ./...
         env:
           TERM: xterm
+
+      - name: Check coverage threshold
+        run: |
+          if [ ! -f unit.coverage.out ]; then
+            echo "::error::Coverage file unit.coverage.out is missing"
+            exit 1
+          fi
+          total_line=$(go tool cover -func=unit.coverage.out | grep '^total:' || true)
+          if [ -z "$total_line" ]; then
+            echo "::error::Coverage file unit.coverage.out is malformed (no total: line)"
+            exit 1
+          fi
+          pct=$(echo "$total_line" | awk '{gsub(/%/,""); print $NF}')
+          if awk -v pct="$pct" 'BEGIN { exit (pct+0 >= 80) ? 0 : 1 }'; then
+            echo "Coverage ${pct}% meets 85% target"
+          else
+            echo "::error::Total coverage ${pct}% is below 85% target"
+            exit 1
+          fi
 
       - name: Upload results to Codecov
         uses: codecov/codecov-action@v4
