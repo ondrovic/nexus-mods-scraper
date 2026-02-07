@@ -542,7 +542,8 @@ func TestExtractCommand_ExecuteRunsExtractRunE(t *testing.T) {
 	tempDir := t.TempDir()
 	defer withExtractTestState(t)()
 	options.OutputDirectory = tempDir
-	RootCmd.SetArgs([]string{"extract", "--no-validate", "--interactive=false", "--output-directory=" + tempDir})
+	viper.Set("quiet", true) // skip terminal clear in root PersistentPreRunE (no TTY in test)
+	RootCmd.SetArgs([]string{"-q", "extract", "--no-validate", "--interactive=false", "--output-directory=" + tempDir})
 	err := RootCmd.Execute()
 	if err != nil {
 		// Typical errors: "no installed browsers..." or "no cookie stores found"

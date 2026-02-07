@@ -22,7 +22,8 @@ func init() {
 	RootCmd.PersistentFlags().BoolP("quiet", "q", false, "Suppress spinner and status output (for piping to jq)")
 	_ = viper.BindPFlags(RootCmd.PersistentFlags())
 	RootCmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
-		if mustGetQuiet(cmd) {
+		// Use parsed quiet flag (from PersistentFlags bound to viper) to skip clear for piping.
+		if viper.GetBool("quiet") {
 			return nil
 		}
 		if err := sCli.ClearTerminalScreen(runtime.GOOS); err != nil {
@@ -30,15 +31,6 @@ func init() {
 		}
 		return nil
 	}
-}
-
-// mustGetQuiet returns the value of the persistent quiet flag; call only after parsing.
-func mustGetQuiet(cmd *cobra.Command) bool {
-	q, err := cmd.PersistentFlags().GetBool("quiet")
-	if err != nil {
-		return false
-	}
-	return q
 }
 
 // Execute runs the RootCmd command, handling any errors that occur during its execution.

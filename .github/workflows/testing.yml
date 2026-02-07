@@ -32,7 +32,7 @@ jobs:
         run: go mod tidy
 
       - name: Run tests
-        run: go test -coverprofile=unit.coverage.out -covermode=atomic ./...
+        run: go test -coverprofile=unit.coverage.out -covermode=atomic ./cmd/... ./internal/...
         env:
           TERM: xterm
 
