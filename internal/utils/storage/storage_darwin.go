@@ -1,6 +1,7 @@
 //go:build darwin
 // +build darwin
 
+// Package storage provides the application data directory path per platform.
 package storage
 
 import (

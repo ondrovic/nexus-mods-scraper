@@ -1,3 +1,4 @@
+// Package exporters handles displaying and saving scrape results and cookies to JSON.
 package exporters
 
 import (

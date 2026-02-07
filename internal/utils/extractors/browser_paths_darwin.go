@@ -4,10 +4,12 @@ package extractors
 
 import "path/filepath"
 
+// getBrowserPaths returns browser cookie paths for the current OS (Darwin); delegates to getMacOSBrowserPaths.
 func getBrowserPaths(home string) []browserPath {
 	return getMacOSBrowserPaths(home)
 }
 
+// getMacOSBrowserPaths returns browser cookie paths for macOS (Firefox, Chrome, Brave, Edge, Vivaldi).
 func getMacOSBrowserPaths(home string) []browserPath {
 	paths := []browserPath{}
 	appSupport := filepath.Join(home, "Library", "Application Support")

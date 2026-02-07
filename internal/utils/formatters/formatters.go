@@ -1,3 +1,4 @@
+// Package formatters provides text cleaning, JSON formatting, and URL/domain helpers.
 package formatters
 
 import (

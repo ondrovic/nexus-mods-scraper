@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 )
 
+// getBrowserPaths returns browser cookie paths for the current OS (Windows); delegates to getWindowsBrowserPaths.
 func getBrowserPaths(home string) []browserPath {
 	return getWindowsBrowserPaths(home)
 }
 
+// getWindowsBrowserPaths returns browser cookie paths for Windows (Firefox, Chrome, Brave, Edge, Vivaldi, Opera).
 func getWindowsBrowserPaths(home string) []browserPath {
 	paths := []browserPath{}
 	localAppData := os.Getenv("LOCALAPPDATA")
@@ -24,12 +26,7 @@ func getWindowsBrowserPaths(home string) []browserPath {
 	}
 
 	// Firefox
-	firefoxRoots := []string{
-		filepath.Join(appData, "Mozilla", "Firefox"),
-	}
-	for _, root := range firefoxRoots {
-		paths = append(paths, findFirefoxProfiles(root, "firefox")...)
-	}
+	paths = append(paths, findFirefoxProfiles(filepath.Join(appData, "Mozilla", "Firefox"), "firefox")...)
 
 	// Chrome
 	chromeRoots := []struct {
@@ -45,33 +42,34 @@ func getWindowsBrowserPaths(home string) []browserPath {
 		paths = append(paths, findChromiumProfiles(cr.path, cr.browser)...)
 	}
 
-	// Brave
-	braveRoots := []string{
-		filepath.Join(localAppData, "BraveSoftware", "Brave-Browser", "User Data"),
-		filepath.Join(localAppData, "BraveSoftware", "Brave-Browser-Beta", "User Data"),
-		filepath.Join(localAppData, "BraveSoftware", "Brave-Browser-Nightly", "User Data"),
+	// Brave (each variant gets a distinct label)
+	braveRoots := []struct {
+		path    string
+		browser string
+	}{
+		{filepath.Join(localAppData, "BraveSoftware", "Brave-Browser", "User Data"), "brave"},
+		{filepath.Join(localAppData, "BraveSoftware", "Brave-Browser-Beta", "User Data"), "brave-beta"},
+		{filepath.Join(localAppData, "BraveSoftware", "Brave-Browser-Nightly", "User Data"), "brave-nightly"},
 	}
-	for _, root := range braveRoots {
-		paths = append(paths, findChromiumProfiles(root, "brave")...)
+	for _, br := range braveRoots {
+		paths = append(paths, findChromiumProfiles(br.path, br.browser)...)
 	}
 
-	// Edge
-	edgeRoots := []string{
-		filepath.Join(localAppData, "Microsoft", "Edge", "User Data"),
-		filepath.Join(localAppData, "Microsoft", "Edge Beta", "User Data"),
-		filepath.Join(localAppData, "Microsoft", "Edge Dev", "User Data"),
+	// Edge (each variant gets a distinct label)
+	edgeRoots := []struct {
+		path    string
+		browser string
+	}{
+		{filepath.Join(localAppData, "Microsoft", "Edge", "User Data"), "edge"},
+		{filepath.Join(localAppData, "Microsoft", "Edge Beta", "User Data"), "edge-beta"},
+		{filepath.Join(localAppData, "Microsoft", "Edge Dev", "User Data"), "edge-dev"},
 	}
-	for _, root := range edgeRoots {
-		paths = append(paths, findChromiumProfiles(root, "edge")...)
+	for _, er := range edgeRoots {
+		paths = append(paths, findChromiumProfiles(er.path, er.browser)...)
 	}
 
 	// Vivaldi
-	vivaldiRoots := []string{
-		filepath.Join(localAppData, "Vivaldi", "User Data"),
-	}
-	for _, root := range vivaldiRoots {
-		paths = append(paths, findChromiumProfiles(root, "vivaldi")...)
-	}
+	paths = append(paths, findChromiumProfiles(filepath.Join(localAppData, "Vivaldi", "User Data"), "vivaldi")...)
 
 	// Opera
 	operaRoots := []string{

@@ -892,9 +892,7 @@ func TestFindAdditionalBrowserCookies_WithTempHome(t *testing.T) {
 	cookiePath := filepath.Join(configDir, "Cookies")
 	createChromiumCookieDB(t, cookiePath, "nexusmods_session", "additional_cookie_value", "nexusmods.com", time.Now().Unix()+86400)
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", home)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", home)
 
 	stores := FindAdditionalBrowserCookies("nexusmods", []string{"nexusmods_session"})
 	require.NotEmpty(t, stores)
@@ -926,9 +924,7 @@ func TestFindAdditionalBrowserCookies_ReadError(t *testing.T) {
 	require.NoError(t, os.MkdirAll(chromeDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(chromeDir, "Cookies"), []byte("not sqlite"), 0644))
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", home)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", home)
 
 	stores := FindAdditionalBrowserCookies("example", []string{"session"})
 	require.NotEmpty(t, stores)

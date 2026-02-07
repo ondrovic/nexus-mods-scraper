@@ -1,3 +1,4 @@
+// Package extractors provides cookie extraction, mod page parsing, and browser path resolution.
 package extractors
 
 import (

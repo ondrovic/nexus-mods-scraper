@@ -1,3 +1,4 @@
+// Package types defines CLI flags, scrape results, mod info, and cookie extraction types.
 package types
 
 import (

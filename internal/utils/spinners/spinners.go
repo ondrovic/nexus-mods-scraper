@@ -1,3 +1,4 @@
+// Package spinners provides terminal spinners for progress feedback.
 package spinners
 
 import (
@@ -40,7 +41,7 @@ func CreateSpinner(startMessage, stopCharacter, stopMessage, stopFailCharacter, 
 	if err != nil {
 		fmt.Printf("failed to create spinner: %v\n", err)
 		processExit(1)
-		return nil
+		return nil // unreachable in production; satisfies compiler when processExit is stubbed in tests
 	}
 
 	return s

@@ -154,6 +154,7 @@ func copyToTemp(src string) (string, error) {
 	return tempFile.Name(), nil
 }
 
+// browserPath holds the path and metadata for a browser's cookie store.
 type browserPath struct {
 	Browser    string
 	Profile    string
@@ -162,6 +163,7 @@ type browserPath struct {
 	IsChromium bool
 }
 
+// getLinuxBrowserPaths returns browser cookie paths for Linux (native and Flatpak).
 func getLinuxBrowserPaths(home string) []browserPath {
 	paths := []browserPath{}
 
@@ -234,6 +236,7 @@ func getLinuxBrowserPaths(home string) []browserPath {
 	return paths
 }
 
+// findFirefoxProfiles finds Firefox (or compatible) profile directories under root that contain cookies.sqlite.
 func findFirefoxProfiles(root, browserName string) []browserPath {
 	paths := []browserPath{}
 
@@ -289,6 +292,7 @@ func findFirefoxProfiles(root, browserName string) []browserPath {
 	return paths
 }
 
+// findChromiumProfiles finds Chromium-based browser profile directories under root that contain a Cookies database.
 func findChromiumProfiles(root, browserName string) []browserPath {
 	paths := []browserPath{}
 

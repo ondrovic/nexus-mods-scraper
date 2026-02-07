@@ -14,13 +14,16 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/ondrovic/nexus-mods-scraper/internal/types"
-	"github.com/ondrovic/nexus-mods-scraper/internal/utils/spinners"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+// scrapeMod creates spinners in this order (when Quiet is false): 1=HTTP setup, 2=scrape, 3=display (if DisplayResults), 4=save (if SaveResults).
+// Call-counting tests (e.g. spinnerThatFailsOnSecondCall and inline closures that switch on call index) depend on this order;
+// if scrapeMod adds, removes, or reorders spinners, update those tests accordingly.
 
 // Mock structures for each dependency
 type Mocker struct {
@@ -139,6 +142,7 @@ func TestRun_InvalidModID(t *testing.T) {
 // TestRun_Success covers the path in run() that builds CliFlags from viper and args
 // and calls scrapeMod (lines 85-98). It uses mocked fetch functions so no real I/O occurs.
 func TestRun_Success(t *testing.T) {
+	defer viper.Reset()
 	tempDir := t.TempDir()
 	cookieFile := filepath.Join(tempDir, "session-cookies.json")
 	require.NoError(t, os.WriteFile(cookieFile, []byte("{}"), 0644))
@@ -488,53 +492,22 @@ func TestScrapeMod_SaveResults_EnsureDirExistsFails(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// failingSpinner is a spinnerI that fails on Start() for testing.
-type failingSpinner struct{}
+// mockSpinner implements spinnerI with configurable error returns for testing.
+type mockSpinner struct {
+	startErr    error
+	stopErr     error
+	stopFailErr error
+}
 
-func (failingSpinner) Start() error                          { return assert.AnError }
-func (failingSpinner) Stop() error                           { return nil }
-func (failingSpinner) StopFail() error                       { return nil }
-func (failingSpinner) StopFailMessage(string)                {}
-func (failingSpinner) StopMessage(string)                    {}
-
-// spinnerStopFailErr returns error on StopFail() to cover stderr "spinner stop error" path.
-type spinnerStopFailErr struct{}
-
-func (spinnerStopFailErr) Start() error        { return nil }
-func (spinnerStopFailErr) Stop() error         { return nil }
-func (spinnerStopFailErr) StopFail() error     { return assert.AnError }
-func (spinnerStopFailErr) StopFailMessage(string) {}
-func (spinnerStopFailErr) StopMessage(string) {}
-
-// spinnerStopErr returns error on Stop() to cover stderr "spinner stop error" path.
-type spinnerStopErr struct{}
-
-func (spinnerStopErr) Start() error        { return nil }
-func (spinnerStopErr) Stop() error         { return assert.AnError }
-func (spinnerStopErr) StopFail() error     { return nil }
-func (spinnerStopErr) StopFailMessage(string) {}
-func (spinnerStopErr) StopMessage(string) {}
-
-// spinnerWithStopErr returns a fixed error from Stop(); used so coverage attributes the if stopErr body.
-type spinnerWithStopErr struct{ err error }
-
-func (s spinnerWithStopErr) Start() error        { return nil }
-func (s spinnerWithStopErr) Stop() error         { return s.err }
-func (s spinnerWithStopErr) StopFail() error      { return nil }
-func (s spinnerWithStopErr) StopFailMessage(string) {}
-func (s spinnerWithStopErr) StopMessage(string) {}
-
-// spinnerOK is a no-op spinner that never fails (for multi-step tests).
-type spinnerOK struct{}
-
-func (spinnerOK) Start() error        { return nil }
-func (spinnerOK) Stop() error         { return nil }
-func (spinnerOK) StopFail() error     { return nil }
-func (spinnerOK) StopFailMessage(string) {}
-func (spinnerOK) StopMessage(string) {}
+func (m mockSpinner) Start() error                    { return m.startErr }
+func (m mockSpinner) Stop() error                     { return m.stopErr }
+func (m mockSpinner) StopFail() error                 { return m.stopFailErr }
+func (m mockSpinner) StopFailMessage(string)          {}
+func (m mockSpinner) StopMessage(string)              {}
 
 // captureStderr runs fn with os.Stderr redirected to a pipe, then returns the captured output.
 // Used to verify "spinner stop error" branches in scrapeMod are executed.
+// Drains the pipe concurrently so fn() cannot block on a full pipe buffer.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -542,10 +515,17 @@ func captureStderr(t *testing.T, fn func()) string {
 	old := os.Stderr
 	os.Stderr = w
 	defer func() { os.Stderr = old }()
-	fn()
-	w.Close()
+
 	var buf bytes.Buffer
-	_, _ = io.Copy(&buf, r)
+	done := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&buf, r)
+		close(done)
+	}()
+
+	fn()
+	w.Close() // signal EOF so the goroutine can finish
+	<-done
 	r.Close()
 	return buf.String()
 }
@@ -555,7 +535,7 @@ func TestScrapeMod_SpinnerStartFails(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
 
 	old := createSpinner
-	createSpinner = func(_, _, _, _, _ string) spinnerI { return failingSpinner{} }
+	createSpinner = func(_, _, _, _, _ string) spinnerI { return mockSpinner{startErr: assert.AnError} }
 	defer func() { createSpinner = old }()
 
 	sc := types.CliFlags{
@@ -575,15 +555,19 @@ func TestScrapeMod_SpinnerStartFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to start spinner")
 }
 
-// spinnerThatFailsOnSecondCall returns a real spinner on the first call (HTTP setup), then a failing spinner (scrape).
+// Spinner creation order in scrapeMod (call-counting tests depend on this):
+// 1 = HTTP setup, 2 = scrape, 3 = display (when DisplayResults) or save (when SaveResults only), 4 = save (when both).
+// If scrapeMod adds, removes, or reorders spinners, update the call numbers in tests below.
+
+// spinnerThatFailsOnSecondCall returns a mock spinner on the first call (HTTP setup), then a failing mock spinner (scrape).
 func spinnerThatFailsOnSecondCall() func(_, _, _, _, _ string) spinnerI {
 	n := 0
 	return func(_, _, _, _, _ string) spinnerI {
 		n++
 		if n == 2 {
-			return failingSpinner{} // second spinner (scrape) fails
+			return mockSpinner{startErr: assert.AnError} // second spinner (scrape) fails
 		}
-		return spinners.CreateSpinner("", "✓", "", "✗", "")
+		return mockSpinner{} // first spinner (HTTP setup) succeeds
 	}
 }
 
@@ -615,7 +599,7 @@ func TestScrapeMod_ScrapeSpinnerStartFails(t *testing.T) {
 // TestScrapeMod_HTTPClientInitError_StopFailReturnsError covers httpSpinner.StopFail() returning error (if stopErr body).
 func TestScrapeMod_HTTPClientInitError_StopFailReturnsError(t *testing.T) {
 	old := createSpinner
-	createSpinner = func(_, _, _, _, _ string) spinnerI { return spinnerStopFailErr{} }
+	createSpinner = func(_, _, _, _, _ string) spinnerI { return mockSpinner{stopFailErr: assert.AnError} }
 	defer func() { createSpinner = old }()
 
 	sc := types.CliFlags{
@@ -640,7 +624,7 @@ func TestScrapeMod_HTTPClientInitSuccess_StopReturnsError(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
 
 	old := createSpinner
-	createSpinner = func(_, _, _, _, _ string) spinnerI { return spinnerStopErr{} }
+	createSpinner = func(_, _, _, _, _ string) spinnerI { return mockSpinner{stopErr: assert.AnError} }
 	defer func() { createSpinner = old }()
 
 	sc := types.CliFlags{
@@ -669,9 +653,9 @@ func TestScrapeMod_FetchModInfoError_StopFailReturnsError(t *testing.T) {
 	createSpinner = func(_, _, _, _, _ string) spinnerI {
 		call++
 		if call == 1 {
-			return spinnerOK{}
+			return mockSpinner{}
 		}
-		return spinnerStopFailErr{}
+		return mockSpinner{stopFailErr: assert.AnError}
 	}
 	defer func() { createSpinner = old }()
 
@@ -705,9 +689,9 @@ func TestScrapeMod_ScrapeSuccess_StopReturnsError(t *testing.T) {
 	createSpinner = func(_, _, _, _, _ string) spinnerI {
 		call++
 		if call == 1 {
-			return spinnerOK{}
+			return mockSpinner{}
 		}
-		return spinnerStopErr{}
+		return mockSpinner{stopErr: assert.AnError}
 	}
 	defer func() { createSpinner = old }()
 
@@ -737,9 +721,9 @@ func TestScrapeMod_DisplaySpinnerStartFails(t *testing.T) {
 	createSpinner = func(_, _, _, _, _ string) spinnerI {
 		call++
 		if call == 3 {
-			return failingSpinner{}
+			return mockSpinner{startErr: assert.AnError}
 		}
-		return spinnerOK{}
+		return mockSpinner{}
 	}
 	defer func() { createSpinner = old }()
 
@@ -772,9 +756,9 @@ func TestScrapeMod_DisplayResultsError_StopFailReturnsError(t *testing.T) {
 	createSpinner = func(_, _, _, _, _ string) spinnerI {
 		call++
 		if call == 3 {
-			return spinnerStopFailErr{}
+			return mockSpinner{stopFailErr: assert.AnError}
 		}
-		return spinnerOK{}
+		return mockSpinner{}
 	}
 	defer func() { createSpinner = old }()
 
@@ -804,9 +788,9 @@ func TestScrapeMod_DisplaySuccess_StopReturnsError(t *testing.T) {
 	createSpinner = func(_, _, _, _, _ string) spinnerI {
 		call++
 		if call == 3 {
-			return spinnerWithStopErr{err: errors.New("display stop")}
+			return mockSpinner{stopErr: errors.New("display stop")}
 		}
-		return spinnerOK{}
+		return mockSpinner{}
 	}
 	defer func() { createSpinner = old }()
 
@@ -838,9 +822,9 @@ func TestScrapeMod_SaveSpinnerStartFails(t *testing.T) {
 	createSpinner = func(_, _, _, _, _ string) spinnerI {
 		call++
 		if call == 4 {
-			return failingSpinner{}
+			return mockSpinner{startErr: assert.AnError}
 		}
-		return spinnerOK{}
+		return mockSpinner{}
 	}
 	defer func() { createSpinner = old }()
 
@@ -881,9 +865,9 @@ func TestScrapeMod_SaveError_StopFailReturnsError(t *testing.T) {
 		call++
 		// DisplayResults false + SaveResults true => 3 spinners only (HTTP, scrape, save)
 		if call == 3 {
-			return spinnerStopFailErr{}
+			return mockSpinner{stopFailErr: assert.AnError}
 		}
-		return spinnerOK{}
+		return mockSpinner{}
 	}
 	defer func() { createSpinner = old }()
 
@@ -938,9 +922,9 @@ func TestScrapeMod_SaveSuccess_StopReturnsError(t *testing.T) {
 	createSpinner = func(_, _, _, _, _ string) spinnerI {
 		call++
 		if call == 3 {
-			return spinnerWithStopErr{err: errors.New("save stop")}
+			return mockSpinner{stopErr: errors.New("save stop")}
 		}
-		return spinnerOK{}
+		return mockSpinner{}
 	}
 	defer func() { createSpinner = old }()
 

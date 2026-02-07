@@ -13,6 +13,7 @@ func InteractiveCookieInput(cookieNames []string) (map[string]string, error) {
 	return interactiveCookieInputWithIO(os.Stdin, os.Stdout, cookieNames)
 }
 
+// interactiveCookieInputWithIO reads cookie values from in and prompts on out; used for testing with fake stdin/stdout.
 func interactiveCookieInputWithIO(in io.Reader, out io.Writer, cookieNames []string) (map[string]string, error) {
 	cookies := make(map[string]string)
 	reader := bufio.NewReader(in)
@@ -49,18 +50,25 @@ func interactiveCookieInputWithIO(in io.Reader, out io.Writer, cookieNames []str
 	return cookies, nil
 }
 
-// PromptForCookieSelection asks the user to choose from available browser cookie stores
-func PromptForCookieSelection(stores []string) (int, error) {
+// PromptForCookieSelection asks the user to choose from available browser cookie stores.
+// It returns the selected 0-based index, an autoSelect flag, and an error.
+// When the user presses Enter for auto-selection, it returns (0, true, nil); the index
+// is undefined when autoSelect is true. When the user picks a store, it returns
+// (index, false, nil). On any error it returns (-1, false, err).
+func PromptForCookieSelection(stores []string) (int, bool, error) {
 	return promptForCookieSelectionWithIO(os.Stdin, os.Stdout, stores)
 }
 
-func promptForCookieSelectionWithIO(in io.Reader, out io.Writer, stores []string) (int, error) {
+// promptForCookieSelectionWithIO asks the user to pick a browser from stores via in/out; used for testing.
+// Return semantics: (index, autoSelect, error). On auto-select returns (0, true, nil);
+// on explicit choice returns (index, false, nil); on error returns (-1, false, err).
+func promptForCookieSelectionWithIO(in io.Reader, out io.Writer, stores []string) (int, bool, error) {
 	if len(stores) == 0 {
-		return -1, fmt.Errorf("no cookie stores available")
+		return -1, false, fmt.Errorf("no cookie stores available")
 	}
 
 	if len(stores) == 1 {
-		return 0, nil
+		return 0, false, nil
 	}
 
 	reader := bufio.NewReader(in)
@@ -75,21 +83,21 @@ func promptForCookieSelectionWithIO(in io.Reader, out io.Writer, stores []string
 
 	input, err := reader.ReadString('\n')
 	if err != nil {
-		return -1, fmt.Errorf("failed to read input: %w", err)
+		return -1, false, fmt.Errorf("failed to read input: %w", err)
 	}
 
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return -1, nil // Auto-select
+		return 0, true, nil
 	}
 
 	var choice int
 	_, err = fmt.Sscanf(input, "%d", &choice)
 	if err != nil || choice < 1 || choice > len(stores) {
-		return -1, fmt.Errorf("invalid selection")
+		return -1, false, fmt.Errorf("invalid selection")
 	}
 
-	return choice - 1, nil
+	return choice - 1, false, nil
 }
 
 // ConfirmAction prompts the user for a yes/no confirmation
@@ -97,6 +105,7 @@ func ConfirmAction(prompt string) bool {
 	return confirmActionWithIO(os.Stdin, os.Stdout, prompt)
 }
 
+// confirmActionWithIO prompts for yes/no on out, reading from in; used for testing.
 func confirmActionWithIO(in io.Reader, out io.Writer, prompt string) bool {
 	reader := bufio.NewReader(in)
 	fmt.Fprintf(out, "%s [y/N]: ", prompt)
@@ -115,6 +124,7 @@ func SelectExtractionMethod() (string, error) {
 	return selectExtractionMethodWithIO(os.Stdin, os.Stdout)
 }
 
+// selectExtractionMethodWithIO prompts for extraction method (auto vs manual) via in/out; used for testing.
 func selectExtractionMethodWithIO(in io.Reader, out io.Writer) (string, error) {
 	reader := bufio.NewReader(in)
 
@@ -137,6 +147,6 @@ func selectExtractionMethodWithIO(in io.Reader, out io.Writer) (string, error) {
 	case "2":
 		return "manual", nil
 	default:
-		return "", fmt.Errorf("invalid selection")
+		return "", fmt.Errorf("invalid selection: got %q; valid choices are 1 (auto-extract), 2 (manual), or Enter for auto", input)
 	}
 }

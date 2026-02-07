@@ -112,35 +112,6 @@ func TestCreateSpinner_StopMessage(t *testing.T) {
 	}
 }
 
-// TestCreateSpinner_CreationError covers the error path when spinner creation fails.
-func TestCreateSpinner_CreationError(t *testing.T) {
-	oldNewSpinner := newSpinner
-	oldProcessExit := processExit
-	defer func() {
-		newSpinner = oldNewSpinner
-		processExit = oldProcessExit
-	}()
-
-	newSpinner = func(_ yacspin.Config) (*yacspin.Spinner, error) {
-		return nil, errors.New("injected spinner failure")
-	}
-	processExit = func(code int) {
-		if code != 1 {
-			t.Errorf("expected exit code 1, got %d", code)
-		}
-		panic("processExit")
-	}
-
-	defer func() {
-		if v := recover(); v != "processExit" {
-			t.Errorf("expected panic processExit, got %v", v)
-		}
-	}()
-
-	CreateSpinner("a", "b", "c", "d", "e")
-	t.Fatal("CreateSpinner should have panicked")
-}
-
 // TestCreateSpinner_CreationErrorReturnsNil covers the return nil path when creation fails
 // and processExit is a no-op (so the function returns instead of exiting).
 func TestCreateSpinner_CreationErrorReturnsNil(t *testing.T) {

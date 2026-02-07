@@ -79,7 +79,6 @@ func initScrapeFlags(cmd *cobra.Command) {
 	cli.RegisterFlag(cmd, "save-results", "s", false, "Do you want to save the results to a JSON file?", &options.SaveResults)
 	cli.RegisterFlag(cmd, "output-directory", "o", storage.GetDataStoragePath(), "Output directory to save files", &options.OutputDirectory)
 	cli.RegisterFlag(cmd, "valid-cookie-names", "c", []string{"nexusmods_session", "nexusmods_session_refresh"}, "Names of the cookies to extract", &options.ValidCookies)
-	cli.RegisterFlag(cmd, "quiet", "q", false, "Suppress spinner and status output (for piping to jq)", &options.Quiet)
 }
 
 // run executes the scrape command, validating that either display or save results
