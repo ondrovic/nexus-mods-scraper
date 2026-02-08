@@ -13,5 +13,11 @@ import (
 // specifically for the nexus-mods-scraper application.
 func GetDataStoragePath() string {
 	userProfileDir := os.Getenv("USERPROFILE")
+	if userProfileDir == "" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			userProfileDir = home
+		}
+	}
 	return filepath.Join(userProfileDir, ".nexus-mods-scraper", "data")
 }

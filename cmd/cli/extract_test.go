@@ -466,6 +466,8 @@ func TestExtractCookies_BehaviorSelectMethodOnly(t *testing.T) {
 	viper.Set("interactive", true)
 	viper.Set("no-validate", true)
 	viper.Set("valid-cookie-names", []string{"session"})
+	options.BaseUrl = "http://example.com"
+	viper.Set("base-url", "http://example.com")
 	options.OutputDirectory = tempDir
 	outputFilename = "session-cookies.json"
 
@@ -544,6 +546,7 @@ func TestExtractCommand_ExecuteRunsExtractRunE(t *testing.T) {
 	options.OutputDirectory = tempDir
 	viper.Set("quiet", true) // skip terminal clear in root PersistentPreRunE (no TTY in test)
 	RootCmd.SetArgs([]string{"-q", "extract", "--no-validate", "--interactive=false", "--output-directory=" + tempDir})
+	defer RootCmd.SetArgs(nil)
 	err := RootCmd.Execute()
 	if err != nil {
 		// Typical errors: "no installed browsers..." or "no cookie stores found"
@@ -596,11 +599,7 @@ func TestExtractCookies_ValidationSuccess_NoUsername(t *testing.T) {
 
 func TestExtractCookies_Interactive_Manual(t *testing.T) {
 	tempDir := t.TempDir()
-	origOutputFilename := outputFilename
-	defer func() {
-		withExtractTestState(t)()
-		outputFilename = origOutputFilename
-	}()
+	defer withExtractTestState(t)()
 	viper.Set("interactive", true)
 	viper.Set("no-validate", true)
 	viper.Set("valid-cookie-names", []string{"session"})

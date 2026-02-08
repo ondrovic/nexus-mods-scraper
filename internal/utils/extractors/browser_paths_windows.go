@@ -71,13 +71,16 @@ func getWindowsBrowserPaths(home string) []browserPath {
 	// Vivaldi
 	paths = append(paths, findChromiumProfiles(filepath.Join(localAppData, "Vivaldi", "User Data"), "vivaldi")...)
 
-	// Opera
-	operaRoots := []string{
-		filepath.Join(appData, "Opera Software", "Opera Stable"),
-		filepath.Join(appData, "Opera Software", "Opera GX Stable"),
+	// Opera (each variant gets a distinct label)
+	operaRoots := []struct {
+		path   string
+		label  string
+	}{
+		{filepath.Join(appData, "Opera Software", "Opera Stable"), "opera"},
+		{filepath.Join(appData, "Opera Software", "Opera GX Stable"), "opera-gx"},
 	}
-	for _, root := range operaRoots {
-		paths = append(paths, findChromiumProfiles(root, "opera")...)
+	for _, op := range operaRoots {
+		paths = append(paths, findChromiumProfiles(op.path, op.label)...)
 	}
 
 	return paths

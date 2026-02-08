@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -240,33 +241,11 @@ func getLinuxBrowserPaths(home string) []browserPath {
 func findFirefoxProfiles(root, browserName string) []browserPath {
 	paths := []browserPath{}
 
-	// Look for profiles.ini
-	profilesIni := filepath.Join(root, "profiles.ini")
-	if _, err := os.Stat(profilesIni); err != nil {
-		// No profiles.ini, try to find profile folders directly
-		entries, err := os.ReadDir(root)
-		if err != nil {
-			return paths
-		}
-		for _, entry := range entries {
-			if entry.IsDir() {
-				cookiePath := filepath.Join(root, entry.Name(), "cookies.sqlite")
-				if _, err := os.Stat(cookiePath); err == nil {
-					paths = append(paths, browserPath{
-						Browser:    browserName,
-						Profile:    entry.Name(),
-						CookiePath: cookiePath,
-						IsDefault:  false,
-						IsChromium: false,
-					})
-				}
-			}
-		}
-		return paths
+	hasProfilesIni := false
+	if _, err := os.Stat(filepath.Join(root, "profiles.ini")); err == nil {
+		hasProfilesIni = true
 	}
 
-	// Parse profiles.ini to find profile paths
-	// This is a simplified version - we just look for directories with cookies.sqlite
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return paths
@@ -276,8 +255,7 @@ func findFirefoxProfiles(root, browserName string) []browserPath {
 		if entry.IsDir() {
 			cookiePath := filepath.Join(root, entry.Name(), "cookies.sqlite")
 			if _, err := os.Stat(cookiePath); err == nil {
-				isDefault := entry.Name() == "default" ||
-					(len(entry.Name()) > 8 && entry.Name()[len(entry.Name())-8:] == "-release")
+				isDefault := hasProfilesIni && (entry.Name() == "default" || strings.HasSuffix(entry.Name(), "-release"))
 				paths = append(paths, browserPath{
 					Browser:    browserName,
 					Profile:    entry.Name(),
@@ -315,7 +293,7 @@ func findChromiumProfiles(root, browserName string) []browserPath {
 	}
 
 	for _, entry := range entries {
-		if entry.IsDir() && len(entry.Name()) > 7 && entry.Name()[:7] == "Profile" {
+		if entry.IsDir() && entry.Name() != "Default" && strings.HasPrefix(entry.Name(), "Profile") {
 			cookiePath := filepath.Join(root, entry.Name(), "Cookies")
 			if _, err := os.Stat(cookiePath); err == nil {
 				paths = append(paths, browserPath{

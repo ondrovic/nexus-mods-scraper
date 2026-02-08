@@ -21,6 +21,8 @@ var RootCmd = &cobra.Command{
 func init() {
 	RootCmd.PersistentFlags().BoolP("quiet", "q", false, "Suppress spinner and status output (for piping to jq)")
 	_ = viper.BindPFlags(RootCmd.PersistentFlags())
+	// Cobra does not chain PersistentPreRunE: if a subcommand sets its own, the root's is not run (and vice versa).
+	// Prefer RunE on subcommands so this hook (e.g. clear-screen when not --quiet) always runs.
 	RootCmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
 		// Use parsed quiet flag (from PersistentFlags bound to viper) to skip clear for piping.
 		if viper.GetBool("quiet") {
@@ -36,10 +38,5 @@ func init() {
 // Execute runs the RootCmd command, handling any errors that occur during its execution.
 // Returns an error if the command fails to execute.
 func Execute() error {
-
-	if err := RootCmd.Execute(); err != nil {
-		return err
-	}
-
-	return nil
+	return RootCmd.Execute()
 }

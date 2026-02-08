@@ -8,11 +8,14 @@ import (
 	"github.com/ondrovic/nexus-mods-scraper/cmd/cli"
 )
 
+// osExit is the process exit function; tests can override it to avoid terminating the test process.
+var osExit = os.Exit
+
 // executeMain runs the CLI and exits the process on error.
 func executeMain(executeFunc func() error) {
 	if err := executeFunc(); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
+		osExit(1)
 	}
 }
 
