@@ -91,6 +91,30 @@ func (m *Mocker) EnsureDirExists(dir string) error {
 	return args.Error(0)
 }
 
+func TestSanitizeFilename(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"normal", "My Mod Name", "My Mod Name"},
+		{"path sep", "Mod/Name", "ModName"},
+		{"backslash", "Mod\\Name", "ModName"},
+		{"parent dir", "Mod..Name", "ModName"},
+		{"invalid chars", "Mod: *? \" <>|", "Mod"},
+		{"trim space", "  Mod Name  ", "Mod Name"},
+		{"empty after sanitize", "..:/\\", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeFilename(tt.input)
+			if got != tt.expected {
+				t.Errorf("sanitizeFilename(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestRun_NoResultsFlagSet(t *testing.T) {
 	// Create a new mock command
 	mockCmd := &cobra.Command{
@@ -146,6 +170,15 @@ func TestRun_InvalidModIDInList(t *testing.T) {
 	err := mockCmd.Execute()
 	assert.Error(t, err)
 	assert.EqualError(t, err, "strconv.ParseInt: parsing \"foo\": invalid syntax")
+}
+
+func TestRun_EmptyModIDInList(t *testing.T) {
+	mockCmd := &cobra.Command{Use: "scrape", RunE: run}
+	initScrapeFlags(mockCmd)
+	mockCmd.SetArgs([]string{"game", "1,,2", "--display-results"})
+	err := mockCmd.Execute()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "empty mod id in list")
 }
 
 // TestRun_Success covers the path in run() that builds CliFlags from viper and args
@@ -491,6 +524,33 @@ func TestScrapeMod_DisplayResults_FormatError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestScrapeMod_DisplayResults_FormatError_QuietMode(t *testing.T) {
+	tempDir := t.TempDir()
+	cookieFile := filepath.Join(tempDir, "session-cookies.json")
+	require.NoError(t, os.WriteFile(cookieFile, []byte("{}"), 0644))
+
+	orig := formatResultsFromModsFunc
+	formatResultsFromModsFunc = func([]types.ModInfo) (string, error) {
+		return "", assert.AnError
+	}
+	defer func() { formatResultsFromModsFunc = orig }()
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory:  tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  true,
+		GameName:        "game",
+		ModIDs:          []int64{1234},
+		Quiet:           true,
+		SaveResults:     false,
+	}
+
+	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+
+	assert.Error(t, err)
+}
+
 func TestScrapeMod_SaveResults_SaveFails_NonQuiet(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based read-only dir is unreliable on Windows")
@@ -539,6 +599,37 @@ func TestScrapeMod_SaveResults_EnsureDirExistsFails(t *testing.T) {
 		Quiet:           true,
 		SaveResults:     true,
 		OutputDirectory: "/dev/null", // not a directory; EnsureDirExists will fail
+	}
+
+	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+
+	assert.Error(t, err)
+}
+
+func TestScrapeMod_SaveOnly_SaveFails_QuietMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-based read-only dir is unreliable on Windows")
+	}
+	// Quiet mode, SaveResults true: output dir is read-only so SaveModInfoToJson fails
+	// when writing the file, covering the return err in the quiet save loop (scrape.go ~line 249).
+	tempDir := t.TempDir()
+	cookieFile := filepath.Join(tempDir, "session-cookies.json")
+	require.NoError(t, os.WriteFile(cookieFile, []byte("{}"), 0644))
+	outputDir := filepath.Join(tempDir, "output")
+	require.NoError(t, os.MkdirAll(outputDir, 0755))
+	require.NoError(t, os.Chmod(outputDir, 0o444))
+	defer os.Chmod(outputDir, 0o755)
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  false,
+		GameName:        "game",
+		ModIDs:          []int64{1234},
+		Quiet:           true,
+		SaveResults:     true,
+		OutputDirectory: outputDir,
 	}
 
 	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)

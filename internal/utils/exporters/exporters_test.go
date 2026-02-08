@@ -322,6 +322,16 @@ func TestDisplayResultsFromMods_MultipleMods(t *testing.T) {
 	mockFormatter.AssertCalled(t, "FormatResultsAsJsonFromMods", mods)
 }
 
+func TestDisplayResultsFromMods_QuietMode(t *testing.T) {
+	sc := types.CliFlags{Quiet: true}
+	mods := []types.ModInfo{{Name: "Mod1", ModID: 1, Creator: "Creator1"}}
+	formatFunc := func(m []types.ModInfo) (string, error) {
+		return `[{"Name":"Mod1","ModID":1,"Creator":"Creator1"}]`, nil
+	}
+	err := DisplayResultsFromMods(sc, mods, formatFunc)
+	assert.NoError(t, err)
+}
+
 func TestDisplayResultsFromMods_FormatError(t *testing.T) {
 	mods := []types.ModInfo{{Name: "Mod1", ModID: 1}}
 	mockFormatter := new(Mocker)
@@ -352,4 +362,56 @@ func TestSaveModInfoToJson_WriteFileError(t *testing.T) {
 	// Assert
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "error saving file")
+}
+
+func TestSaveModInfoToJson_MarshalError(t *testing.T) {
+	tempDir := t.TempDir()
+	mockUtils := new(Mocker)
+	mockUtils.On("EnsureDirExists", tempDir).Return(nil)
+
+	// Data that cannot be marshalled to JSON (channels are not supported)
+	badData := make(chan int)
+
+	_, err := SaveModInfoToJson(types.CliFlags{}, badData, tempDir, "modinfo", mockUtils.EnsureDirExists)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "error formatting data")
+	mockUtils.AssertCalled(t, "EnsureDirExists", tempDir)
+}
+
+func TestSaveCookiesToJson_MarshalError(t *testing.T) {
+	dir := t.TempDir()
+	mockUtils := new(Mocker)
+	mockUtils.On("EnsureDirExists", dir).Return(nil)
+
+	tempFile, err := os.CreateTemp("", "test")
+	assert.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	openFileFunc := func(name string, flag int, perm os.FileMode) (*os.File, error) {
+		return tempFile, nil
+	}
+
+	// Data that cannot be marshalled to JSON
+	badData := make(chan int)
+
+	err = SaveCookiesToJson(dir, "cookies.json", badData, openFileFunc, mockUtils.EnsureDirExists)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "json: unsupported type")
+	mockUtils.AssertCalled(t, "EnsureDirExists", dir)
+}
+
+func TestSaveCookiesToJson_WriteError(t *testing.T) {
+	dir := t.TempDir()
+	mockUtils := new(Mocker)
+	mockUtils.On("EnsureDirExists", dir).Return(nil)
+
+	// Use a directory path so "file" is not writable (open succeeds but Write fails when writing to dir)
+	openFileFunc := func(name string, flag int, perm os.FileMode) (*os.File, error) {
+		return os.Open(dir) // open dir read-only; Write will fail
+	}
+
+	data := map[string]string{"session": "1234"}
+	err := SaveCookiesToJson(dir, "cookies.json", data, openFileFunc, mockUtils.EnsureDirExists)
+	assert.Error(t, err)
+	mockUtils.AssertCalled(t, "EnsureDirExists", dir)
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/TylerBrock/colorjson"
 	"github.com/ondrovic/nexus-mods-scraper/internal/types"
 )
 
@@ -193,6 +194,30 @@ func TestFormatResultsAsJsonFromMods(t *testing.T) {
 	}
 }
 
+// Test for FormatResultsAsJsonFromMods multi-mod marshal error path
+func TestFormatResultsAsJsonFromMods_MarshalError(t *testing.T) {
+	old := marshalIndent
+	marshalIndent = func(_ interface{}, _, _ string) ([]byte, error) {
+		return nil, errors.New("injected marshal error")
+	}
+	defer func() { marshalIndent = old }()
+
+	mods := []types.ModInfo{
+		{Name: "A", ModID: 1},
+		{Name: "B", ModID: 2},
+	}
+	result, err := FormatResultsAsJsonFromMods(mods)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if result != "" {
+		t.Errorf("expected empty string on error, got %q", result)
+	}
+	if !strings.Contains(err.Error(), "failed to marshal") {
+		t.Errorf("expected error to mention marshal failure, got %v", err)
+	}
+}
+
 // Test for PrintJson
 func TestPrintJson(t *testing.T) {
 	data := `{
@@ -230,6 +255,23 @@ func TestPrintPrettyJson_InvalidJSON(t *testing.T) {
 	err := PrintPrettyJson(data)
 	if err == nil {
 		t.Error("expected error for invalid JSON, got nil")
+	}
+}
+
+// Test for PrintPrettyJson when formatter Marshal fails (covers error path).
+func TestPrintPrettyJson_FormatterMarshalError(t *testing.T) {
+	old := formatterMarshal
+	formatterMarshal = func(_ *colorjson.Formatter, _ interface{}) ([]byte, error) {
+		return nil, errors.New("injected formatter marshal error")
+	}
+	defer func() { formatterMarshal = old }()
+
+	err := PrintPrettyJson(`{"a":1}`)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to marshal formatted JSON") {
+		t.Errorf("expected error to mention marshal failure, got %v", err)
 	}
 }
 

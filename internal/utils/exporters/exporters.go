@@ -27,8 +27,7 @@ func DisplayResults(sc types.CliFlags, results types.Results, formatResultsFunc 
 		return nil
 	}
 
-	formatters.PrintPrettyJson(jsonResults)
-	return nil
+	return formatters.PrintPrettyJson(jsonResults)
 }
 
 // DisplayResultsFromMods formats and displays a slice of mod results. It takes command-line
@@ -45,8 +44,7 @@ func DisplayResultsFromMods(sc types.CliFlags, mods []types.ModInfo, formatResul
 		return nil
 	}
 
-	formatters.PrintPrettyJson(jsonResults)
-	return nil
+	return formatters.PrintPrettyJson(jsonResults)
 }
 
 // SaveCookiesToJson saves the provided cookie data as a JSON file in the specified directory.

@@ -77,6 +77,9 @@ func CookieDomain(url string) string {
 // marshalIndent is used by FormatResultsAsJson; tests may override to simulate marshal failure.
 var marshalIndent = json.MarshalIndent
 
+// formatterMarshal is used by PrintPrettyJson; tests may override to simulate formatter marshal failure.
+var formatterMarshal = func(f *colorjson.Formatter, obj interface{}) ([]byte, error) { return f.Marshal(obj) }
+
 // FormatResultsAsJson takes a ModInfo object, formats it as a pretty-printed JSON
 // string, and returns the result. If marshalling fails, it returns an error.
 func FormatResultsAsJson(mods types.ModInfo) (string, error) {
@@ -128,7 +131,7 @@ func PrintPrettyJson(data string, useAltColors ...bool) error {
 		f.StringColor = color.New(color.FgHiMagenta)
 	}
 
-	s, err := f.Marshal(obj)
+	s, err := formatterMarshal(f, obj)
 	if err != nil {
 		return fmt.Errorf("failed to marshal formatted JSON: %w", err)
 	}
@@ -172,6 +175,7 @@ func StrToInt64Slice(input string) ([]int64, error) {
 		}
 		result = append(result, n)
 	}
+	// Defensive: strings.Split(_, ",") plus the loop above only append on valid tokens, so result cannot be empty here unless we already returned an error.
 	if len(result) == 0 {
 		return nil, fmt.Errorf("no valid mod ids in %q", input)
 	}

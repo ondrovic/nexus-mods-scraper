@@ -21,7 +21,36 @@ import (
 
 	"path/filepath"
 	"strings"
+	"unicode"
 )
+
+// maxFilenameLength limits sanitized mod name length to avoid filesystem path limits.
+const maxFilenameLength = 200
+
+// sanitizeFilename removes path separators, "..", and OS-invalid characters from
+// a string intended for use in a filename. It trims whitespace and limits length.
+func sanitizeFilename(name string) string {
+	// Remove path separators and ".."
+	s := strings.ReplaceAll(name, "/", "")
+	s = strings.ReplaceAll(s, "\\", "")
+	s = strings.ReplaceAll(s, "..", "")
+	// Remove OS-invalid characters: : * ? " < > |
+	invalid := []rune{':', '*', '?', '"', '<', '>', '|'}
+	for _, r := range invalid {
+		s = strings.ReplaceAll(s, string(r), "")
+	}
+	// Collapse and trim whitespace
+	s = strings.TrimSpace(s)
+	runes := []rune(s)
+	if len(runes) > maxFilenameLength {
+		runes = runes[:maxFilenameLength]
+	}
+	// Trim any trailing spaces after truncation
+	for len(runes) > 0 && unicode.IsSpace(runes[len(runes)-1]) {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes)
+}
 
 // spinnerI is the subset of spinner operations used by scrapeMod; tests may inject a mock.
 type spinnerI interface {
@@ -93,6 +122,7 @@ func run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Defensive: StrToInt64Slice already errors on empty result; keep for clarity.
 	if len(modIDs) == 0 {
 		return fmt.Errorf("no mod IDs specified")
 	}
@@ -146,7 +176,8 @@ func scrapeMod(
 		}
 	}
 
-	// Scrape Mod Info (one fetch per mod ID)
+	// Scrape Mod Info (one fetch per mod ID).
+	// On failure, we return immediately with no partial results; a best-effort mode could collect errors and continue.
 	var mods []types.ModInfo
 	var scrapeSpinnerMsg string
 	switch {
@@ -225,7 +256,7 @@ func scrapeMod(
 			}
 			var lastSaved string
 			for _, mod := range mods {
-				outputFilename := fmt.Sprintf("%s %d", strings.ToLower(mod.Name), mod.ModID)
+				outputFilename := fmt.Sprintf("%s %d", strings.ToLower(sanitizeFilename(mod.Name)), mod.ModID)
 				item, err := exporters.SaveModInfoToJson(sc, types.Results{Mods: mod}, outputGameDirectory, outputFilename, utils.EnsureDirExists)
 				if err != nil {
 					saveSpinner.StopFailMessage(fmt.Sprintf("Error saving results: %v", err))
@@ -237,14 +268,18 @@ func scrapeMod(
 				lastSaved = item
 			}
 			if len(mods) > 0 {
-				saveSpinner.StopMessage(fmt.Sprintf("Saved successfully to %s", termlink.ColorLink(lastSaved, lastSaved, "green")))
+				if len(mods) == 1 {
+					saveSpinner.StopMessage(fmt.Sprintf("Saved successfully to %s", termlink.ColorLink(lastSaved, lastSaved, "green")))
+				} else {
+					saveSpinner.StopMessage(fmt.Sprintf("Saved %d file(s) to %s", len(mods), termlink.ColorLink(outputGameDirectory, outputGameDirectory, "green")))
+				}
 			}
 			if stopErr := saveSpinner.Stop(); stopErr != nil {
 				fmt.Fprintf(os.Stderr, "spinner stop error: %v\n", stopErr)
 			}
 		} else {
 			for _, mod := range mods {
-				outputFilename := fmt.Sprintf("%s %d", strings.ToLower(mod.Name), mod.ModID)
+				outputFilename := fmt.Sprintf("%s %d", strings.ToLower(sanitizeFilename(mod.Name)), mod.ModID)
 				if _, err := exporters.SaveModInfoToJson(sc, types.Results{Mods: mod}, outputGameDirectory, outputFilename, utils.EnsureDirExists); err != nil {
 					return err
 				}
