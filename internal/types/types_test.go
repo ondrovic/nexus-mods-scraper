@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestNewScraper verifies NewScraper returns a CliFlags with expected defaults.
 func TestNewScraper(t *testing.T) {
 	// Act
 	scraper := NewScraper()
@@ -26,6 +27,7 @@ func TestNewScraper(t *testing.T) {
 	assert.Empty(t, scraper.ValidCookies)
 }
 
+// TestModInfoJSONMarshalling checks ModInfo JSON marshal/unmarshal round-trip.
 func TestModInfoJSONMarshalling(t *testing.T) {
 	// Arrange
 	modInfo := ModInfo{
@@ -65,6 +67,7 @@ func TestModInfoJSONMarshalling(t *testing.T) {
 	assert.JSONEq(t, expectedJSON, string(data))
 }
 
+// TestResultsJSONMarshalling checks Results JSON marshal/unmarshal round-trip.
 func TestResultsJSONMarshalling(t *testing.T) {
 	// Arrange
 	results := Results{
@@ -83,6 +86,7 @@ func TestResultsJSONMarshalling(t *testing.T) {
 	assert.Contains(t, string(data), `"Mods"`)
 }
 
+// TestRequirementStruct verifies Requirement fields and JSON tags.
 func TestRequirementStruct(t *testing.T) {
 	// Arrange
 	req := Requirement{
@@ -99,6 +103,7 @@ func TestRequirementStruct(t *testing.T) {
 	assert.JSONEq(t, expectedJSON, string(data))
 }
 
+// TestFileStruct verifies File struct fields and JSON marshalling.
 func TestFileStruct(t *testing.T) {
 	// Arrange
 	file := File{

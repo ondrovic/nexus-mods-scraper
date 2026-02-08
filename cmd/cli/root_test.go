@@ -9,12 +9,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestRootCmd_Initialized verifies RootCmd has expected Use and Short.
 func TestRootCmd_Initialized(t *testing.T) {
 	// Ensure that RootCmd is correctly initialized
 	assert.Equal(t, "nexus-mods-scraper", RootCmd.Use)
 	assert.Equal(t, "A CLI tool to scrape https://nexusmods.com mods and return the information in JSON format", RootCmd.Short)
 }
 
+// TestExecute_Success verifies Execute returns nil when root command succeeds.
 func TestExecute_Success(t *testing.T) {
 	origRoot := RootCmd
 	defer func() { RootCmd = origRoot }()
@@ -32,6 +34,7 @@ func TestExecute_Success(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestExecute_Failure verifies Execute returns the root command error.
 func TestExecute_Failure(t *testing.T) {
 	origRoot := RootCmd
 	defer func() { RootCmd = origRoot }()
@@ -50,6 +53,7 @@ func TestExecute_Failure(t *testing.T) {
 	assert.Equal(t, "execution failed", err.Error())
 }
 
+// TestRootCmd_PersistentPreRunE_QuietSkipsClear verifies clear is skipped when quiet is set.
 func TestRootCmd_PersistentPreRunE_QuietSkipsClear(t *testing.T) {
 	origQuiet := viper.Get("quiet")
 	viper.Set("quiet", true)
@@ -59,6 +63,7 @@ func TestRootCmd_PersistentPreRunE_QuietSkipsClear(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestRootCmd_PersistentPreRunE_ClearTerminalSuccess verifies pre-run clears terminal when not quiet.
 func TestRootCmd_PersistentPreRunE_ClearTerminalSuccess(t *testing.T) {
 	orig := clearTerminalScreen
 	defer func() { clearTerminalScreen = orig }()
@@ -72,6 +77,7 @@ func TestRootCmd_PersistentPreRunE_ClearTerminalSuccess(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestRootCmd_PersistentPreRunE_ClearTerminalError verifies pre-run returns error when clear fails.
 func TestRootCmd_PersistentPreRunE_ClearTerminalError(t *testing.T) {
 	orig := clearTerminalScreen
 	defer func() { clearTerminalScreen = orig }()

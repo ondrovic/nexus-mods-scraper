@@ -151,6 +151,7 @@ func TestFormatResultsAsJson_MarshalError(t *testing.T) {
 	}
 }
 
+// TestFormatResultsAsJsonFromMods verifies FormatResultsAsJsonFromMods for single and multiple mods.
 func TestFormatResultsAsJsonFromMods(t *testing.T) {
 	single := types.ModInfo{Name: "Single", ModID: 1, LastChecked: time.Time{}}
 	multi := []types.ModInfo{
@@ -334,6 +335,7 @@ func TestStrToInt(t *testing.T) {
 	}
 }
 
+// TestStrToInt64Slice verifies parsing of comma-separated integer strings.
 func TestStrToInt64Slice(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -36,26 +36,31 @@ func (m *Mocker) Do(req *http.Request) (*http.Response, error) {
 	return args.Get(0).(*http.Response), args.Error(1)
 }
 
+// SetCookies records the call for the mock cookie jar.
 func (m *Mocker) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	m.Called(u, cookies)
 }
 
+// Cookies returns the mock's canned cookies for the given URL.
 func (m *Mocker) Cookies(u *url.URL) []*http.Cookie {
 	args := m.Called(u)
 	return args.Get(0).([]*http.Cookie)
 }
 
+// RoundTrip implements http.RoundTripper for the mock client.
 func (m *Mocker) RoundTrip(req *http.Request) (*http.Response, error) {
 	args := m.Called(req)
 	return args.Get(0).(*http.Response), args.Error(1)
 }
 
+// mockFetchDocument returns a minimal goquery document for tests.
 var mockFetchDocument = func(_ string) (*goquery.Document, error) {
 	html := `<html><body>Mocked HTML content</body></html>`
 	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
 	return doc, nil
 }
 
+// mockFetchModInfoConcurrent returns a fixed Results struct for tests.
 var mockFetchModInfoConcurrent = func(baseUrl, game string, modId int64, concurrentFetch func(tasks ...func() error) error, fetchDocument func(targetURL string) (*goquery.Document, error)) (types.Results, error) {
 	return types.Results{
 		Mods: types.ModInfo{
@@ -65,22 +70,25 @@ var mockFetchModInfoConcurrent = func(baseUrl, game string, modId int64, concurr
 	}, nil
 }
 
-// Spinner mocks
+// Start implements the spinner interface for the mock.
 func (m *Mocker) Start() error {
 	args := m.Called()
 	return args.Error(0)
 }
 
+// Stop implements the spinner interface for the mock.
 func (m *Mocker) Stop() error {
 	args := m.Called()
 	return args.Error(0)
 }
 
+// StopFail implements the spinner interface for the mock.
 func (m *Mocker) StopFail() error {
 	args := m.Called()
 	return args.Error(0)
 }
 
+// StopFailMessage implements the spinner interface for the mock.
 func (m *Mocker) StopFailMessage(msg string) {
 	m.Called(msg)
 }
@@ -91,30 +99,37 @@ func (m *Mocker) EnsureDirExists(dir string) error {
 	return args.Error(0)
 }
 
+// TestSanitizeFilename verifies that sanitizeFilename removes invalid path characters and truncates length.
 func TestSanitizeFilename(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
+		modID    int64
 		expected string
 	}{
-		{"normal", "My Mod Name", "My Mod Name"},
-		{"path sep", "Mod/Name", "ModName"},
-		{"backslash", "Mod\\Name", "ModName"},
-		{"parent dir", "Mod..Name", "ModName"},
-		{"invalid chars", "Mod: *? \" <>|", "Mod"},
-		{"trim space", "  Mod Name  ", "Mod Name"},
-		{"empty after sanitize", "..:/\\", ""},
+		{"normal", "My Mod Name", 1, "My Mod Name"},
+		{"path sep", "Mod/Name", 1, "ModName"},
+		{"backslash", "Mod\\Name", 1, "ModName"},
+		{"parent dir", "Mod..Name", 1, "Mod.Name"},
+		{"invalid chars", "Mod: *? \" <>|", 1, "Mod"},
+		{"trim space", "  Mod Name  ", 1, "Mod Name"},
+		{"collapse spaces", "Mod   \t  Name", 1, "Mod Name"},
+		{"collapse dots", "Mod....Name", 1, "Mod.Name"},
+		{"empty after sanitize", "..:/\\", 42, "file_42"},
+		{"truncation at max length", strings.Repeat("a", 250), 99, strings.Repeat("a", maxFilenameLength)},
+		{"truncation then trim trailing space", strings.Repeat("x", 198) + "   ", 1, strings.Repeat("x", 198)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := sanitizeFilename(tt.input)
+			got := sanitizeFilename(tt.input, tt.modID)
 			if got != tt.expected {
-				t.Errorf("sanitizeFilename(%q) = %q, want %q", tt.input, got, tt.expected)
+				t.Errorf("sanitizeFilename(%q, %d) = %q, want %q", tt.input, tt.modID, got, tt.expected)
 			}
 		})
 	}
 }
 
+// TestRun_NoResultsFlagSet checks that run returns an error when neither display nor save is set.
 func TestRun_NoResultsFlagSet(t *testing.T) {
 	// Create a new mock command
 	mockCmd := &cobra.Command{
@@ -136,6 +151,7 @@ func TestRun_NoResultsFlagSet(t *testing.T) {
 	assert.EqualError(t, err, "at least one of --display-results (-r) or --save-results (-s) must be enabled")
 }
 
+// TestRun_InvalidModID checks that run returns an error for non-numeric mod ID.
 func TestRun_InvalidModID(t *testing.T) {
 	// Create a new mock command
 	mockCmd := &cobra.Command{
@@ -163,6 +179,7 @@ func TestRun_InvalidModID(t *testing.T) {
 	assert.True(t, viper.GetBool("display-results"))
 }
 
+// TestRun_InvalidModIDInList checks that run returns an error when the comma-separated list contains invalid IDs.
 func TestRun_InvalidModIDInList(t *testing.T) {
 	mockCmd := &cobra.Command{Use: "scrape", RunE: run}
 	initScrapeFlags(mockCmd)
@@ -172,6 +189,7 @@ func TestRun_InvalidModIDInList(t *testing.T) {
 	assert.EqualError(t, err, "strconv.ParseInt: parsing \"foo\": invalid syntax")
 }
 
+// TestRun_EmptyModIDInList checks that run returns an error when no mod IDs are provided.
 func TestRun_EmptyModIDInList(t *testing.T) {
 	mockCmd := &cobra.Command{Use: "scrape", RunE: run}
 	initScrapeFlags(mockCmd)
@@ -220,6 +238,7 @@ func TestRun_Success(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestRun_MultipleModIDs verifies run with multiple comma-separated mod IDs.
 func TestRun_MultipleModIDs(t *testing.T) {
 	defer viper.Reset()
 	tempDir := t.TempDir()
@@ -265,6 +284,7 @@ func TestRun_MultipleModIDs(t *testing.T) {
 	assert.Equal(t, 2, jsonCount, "expected 2 saved JSON files for 2 mod IDs")
 }
 
+// TestScrapeMod_WithMockedFunctions verifies scrapeMod with injected fetch and document functions.
 func TestScrapeMod_WithMockedFunctions(t *testing.T) {
 	// Create a temporary directory for the test
 	tempDir := t.TempDir()
@@ -298,6 +318,7 @@ func TestScrapeMod_WithMockedFunctions(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestScrapeMod_QuietMode verifies scrapeMod when quiet mode is enabled (no spinners).
 func TestScrapeMod_QuietMode(t *testing.T) {
 	// Create a temporary directory for the test
 	tempDir := t.TempDir()
@@ -332,6 +353,7 @@ func TestScrapeMod_QuietMode(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestScrapeMod_DisplayOnly verifies scrapeMod when only display-results is set.
 func TestScrapeMod_DisplayOnly(t *testing.T) {
 	// Create a temporary directory for the test
 	tempDir := t.TempDir()
@@ -359,6 +381,7 @@ func TestScrapeMod_DisplayOnly(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestScrapeMod_FetchModInfoError_QuietMode checks scrapeMod returns the fetch error in quiet mode.
 func TestScrapeMod_FetchModInfoError_QuietMode(t *testing.T) {
 	// Create a temporary directory for the test
 	tempDir := t.TempDir()
@@ -392,6 +415,7 @@ func TestScrapeMod_FetchModInfoError_QuietMode(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestScrapeMod_FetchModInfoError_NonQuietMode checks scrapeMod shows spinner and returns the fetch error when not quiet.
 func TestScrapeMod_FetchModInfoError_NonQuietMode(t *testing.T) {
 	// Create a temporary directory for the test
 	tempDir := t.TempDir()
@@ -425,6 +449,7 @@ func TestScrapeMod_FetchModInfoError_NonQuietMode(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestScrapeMod_SaveOnly_QuietMode verifies scrapeMod saves to file when save-results is set and quiet is true.
 func TestScrapeMod_SaveOnly_QuietMode(t *testing.T) {
 	// Create a temporary directory for the test
 	tempDir := t.TempDir()
@@ -459,6 +484,7 @@ func TestScrapeMod_SaveOnly_QuietMode(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestScrapeMod_HTTPClientInitError_QuietMode checks that HTTP client init failure returns error in quiet mode.
 func TestScrapeMod_HTTPClientInitError_QuietMode(t *testing.T) {
 	// Prepare test CliFlags with invalid paths (will cause HTTP client init to fail)
 	sc := types.CliFlags{
@@ -479,6 +505,7 @@ func TestScrapeMod_HTTPClientInitError_QuietMode(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestScrapeMod_HTTPClientInitError_NonQuietMode checks that HTTP client init failure is reported when not quiet.
 func TestScrapeMod_HTTPClientInitError_NonQuietMode(t *testing.T) {
 	// Same as above but Quiet: false to cover spinner StopFail path
 	sc := types.CliFlags{
@@ -497,6 +524,7 @@ func TestScrapeMod_HTTPClientInitError_NonQuietMode(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestScrapeMod_DisplayResults_FormatError checks that display formatting failure is returned as error.
 func TestScrapeMod_DisplayResults_FormatError(t *testing.T) {
 	tempDir := t.TempDir()
 	cookieFile := filepath.Join(tempDir, "session-cookies.json")
@@ -524,6 +552,7 @@ func TestScrapeMod_DisplayResults_FormatError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestScrapeMod_DisplayResults_FormatError_QuietMode checks format error path in quiet mode.
 func TestScrapeMod_DisplayResults_FormatError_QuietMode(t *testing.T) {
 	tempDir := t.TempDir()
 	cookieFile := filepath.Join(tempDir, "session-cookies.json")
@@ -551,6 +580,7 @@ func TestScrapeMod_DisplayResults_FormatError_QuietMode(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestScrapeMod_SaveResults_SaveFails_NonQuiet checks that save failure is reported when not quiet.
 func TestScrapeMod_SaveResults_SaveFails_NonQuiet(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based read-only dir is unreliable on Windows")
@@ -583,6 +613,7 @@ func TestScrapeMod_SaveResults_SaveFails_NonQuiet(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestScrapeMod_SaveResults_EnsureDirExistsFails checks that EnsureDirExists failure is returned.
 func TestScrapeMod_SaveResults_EnsureDirExistsFails(t *testing.T) {
 	// OutputDirectory under a non-directory path so EnsureDirExists fails (covers that error return)
 	tempDir := t.TempDir()
@@ -606,6 +637,7 @@ func TestScrapeMod_SaveResults_EnsureDirExistsFails(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestScrapeMod_SaveOnly_SaveFails_QuietMode checks save failure path when only save is enabled and quiet.
 func TestScrapeMod_SaveOnly_SaveFails_QuietMode(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based read-only dir is unreliable on Windows")
@@ -638,16 +670,22 @@ func TestScrapeMod_SaveOnly_SaveFails_QuietMode(t *testing.T) {
 }
 
 // mockSpinner implements spinnerI with configurable error returns for testing.
+// Used to simulate Start/Stop/StopFail errors in scrapeMod tests.
 type mockSpinner struct {
 	startErr    error
 	stopErr     error
 	stopFailErr error
 }
 
+// Start returns the mock's configured start error.
 func (m mockSpinner) Start() error                    { return m.startErr }
+// Stop returns the mock's configured stop error.
 func (m mockSpinner) Stop() error                     { return m.stopErr }
+// StopFail returns the mock's configured stop-fail error.
 func (m mockSpinner) StopFail() error                 { return m.stopFailErr }
+// StopFailMessage is a no-op for the mock.
 func (m mockSpinner) StopFailMessage(string)          {}
+// StopMessage is a no-op for the mock.
 func (m mockSpinner) StopMessage(string)              {}
 
 // captureStderr runs fn with os.Stderr redirected to a pipe, then returns the captured output.
@@ -675,6 +713,7 @@ func captureStderr(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
+// TestScrapeMod_SpinnerStartFails checks that HTTP setup spinner Start() failure is returned.
 func TestScrapeMod_SpinnerStartFails(t *testing.T) {
 	tempDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
@@ -716,6 +755,7 @@ func spinnerThatFailsOnSecondCall() func(_, _, _, _, _ string) spinnerI {
 	}
 }
 
+// TestScrapeMod_ScrapeSpinnerStartFails checks that scrape spinner Start() failure is returned.
 func TestScrapeMod_ScrapeSpinnerStartFails(t *testing.T) {
 	tempDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))

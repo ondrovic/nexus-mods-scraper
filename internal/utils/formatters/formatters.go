@@ -175,9 +175,5 @@ func StrToInt64Slice(input string) ([]int64, error) {
 		}
 		result = append(result, n)
 	}
-	// Defensive: strings.Split(_, ",") plus the loop above only append on valid tokens, so result cannot be empty here unless we already returned an error.
-	if len(result) == 0 {
-		return nil, fmt.Errorf("no valid mod ids in %q", input)
-	}
 	return result, nil
 }

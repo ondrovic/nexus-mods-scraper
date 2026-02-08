@@ -14,35 +14,42 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
+// Mocker is a mock HTTP client and cookie jar for fetcher tests.
 type Mocker struct {
 	mock.Mock
 }
 
+// Do implements the HTTPClient interface for the mock.
 func (m *Mocker) Do(req *http.Request) (*http.Response, error) {
 	args := m.Called(req)
 	return args.Get(0).(*http.Response), args.Error(1)
 }
 
+// SetCookies records the call for the mock cookie jar.
 func (m *Mocker) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	m.Called(u, cookies)
 }
 
+// Cookies returns the mock's canned cookies for the given URL.
 func (m *Mocker) Cookies(u *url.URL) []*http.Cookie {
 	args := m.Called(u)
 	return args.Get(0).([]*http.Cookie)
 }
 
+// RoundTrip implements http.RoundTripper for the mock.
 func (m *Mocker) RoundTrip(req *http.Request) (*http.Response, error) {
 	args := m.Called(req)
 	return args.Get(0).(*http.Response), args.Error(1)
 }
 
+// mockFetchDocument returns a minimal goquery document for fetcher tests.
 var mockFetchDocument = func(_ string) (*goquery.Document, error) {
 	html := `<html><body>Mocked HTML content</body></html>`
 	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
 	return doc, nil
 }
 
+// mockConcurrentFetch runs tasks sequentially for fetcher tests.
 var mockConcurrentFetch = func(tasks ...func() error) error {
 	// Mock behavior: run all tasks sequentially without concurrency for simplicity in testing
 	for _, task := range tasks {
@@ -53,6 +60,7 @@ var mockConcurrentFetch = func(tasks ...func() error) error {
 	return nil
 }
 
+// TestFetchModInfoConcurrent_Success verifies successful concurrent mod and file fetch.
 func TestFetchModInfoConcurrent_Success(t *testing.T) {
 	// Arrange
 	mockClient := new(Mocker)
@@ -83,6 +91,7 @@ func TestFetchModInfoConcurrent_Success(t *testing.T) {
 
 }
 
+// TestFetchDocument_Success verifies FetchDocument with a successful HTTP response.
 func TestFetchDocument_Success(t *testing.T) {
 	// Arrange
 	targetURL := "https://example.com"
@@ -126,6 +135,7 @@ func TestFetchDocument_Success(t *testing.T) {
 	mockTransport.AssertCalled(t, "RoundTrip", mock.Anything) // Ensure RoundTrip was called
 }
 
+// TestFetchDocument_RequestError checks error when request URL is invalid.
 func TestFetchDocument_RequestError(t *testing.T) {
 	// Arrange
 	targetURL := "://invalid-url"
@@ -139,11 +149,13 @@ func TestFetchDocument_RequestError(t *testing.T) {
 	assert.Contains(t, err.Error(), "missing protocol scheme")
 }
 
+// TestFetchModInfoConcurrent_InvalidBaseURL checks error when base URL is invalid.
 func TestFetchModInfoConcurrent_InvalidBaseURL(t *testing.T) {
 	_, err := FetchModInfoConcurrent("://bad", "game", 12345, mockConcurrentFetch, mockFetchDocument)
 	assert.Error(t, err)
 }
 
+// TestFetchModInfoConcurrent_AdultContent checks error when adult content is detected.
 func TestFetchModInfoConcurrent_AdultContent(t *testing.T) {
 	// IsAdultContent returns true when h1 is "Please log in or register"
 	adultHTML := `<html><body><h1>Please log in or register</h1></body></html>`
@@ -155,6 +167,7 @@ func TestFetchModInfoConcurrent_AdultContent(t *testing.T) {
 	assert.Contains(t, err.Error(), "adult content detected")
 }
 
+// TestFetchDocument_Non200 checks error when response status is not 200.
 func TestFetchDocument_Non200(t *testing.T) {
 	mockTransport := new(Mocker)
 	mockJar := new(Mocker)
@@ -171,6 +184,7 @@ func TestFetchDocument_Non200(t *testing.T) {
 	assert.Contains(t, err.Error(), "404")
 }
 
+// TestFetchDocument_BodyParseError checks error when response body cannot be parsed.
 func TestFetchDocument_BodyParseError(t *testing.T) {
 	mockTransport := new(Mocker)
 	mockJar := new(Mocker)
@@ -191,6 +205,7 @@ func TestFetchDocument_BodyParseError(t *testing.T) {
 // errReader implements io.Reader and returns an error on Read
 type errReader struct{}
 
+// Read implements io.Reader and always returns an error for testing.
 func (errReader) Read(_ []byte) (int, error) {
 	return 0, errors.New("read error")
 }

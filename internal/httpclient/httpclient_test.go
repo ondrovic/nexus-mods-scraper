@@ -18,20 +18,24 @@ type Mocker struct {
 	mock.Mock
 }
 
+// Do implements the HTTPClient interface for the mock.
 func (m *Mocker) Do(req *http.Request) (*http.Response, error) {
 	args := m.Called(req)
 	return args.Get(0).(*http.Response), args.Error(1)
 }
 
+// SetCookies records the call for the mock cookie jar.
 func (m *Mocker) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	m.Called(u, cookies)
 }
 
+// Cookies returns the mock's canned cookies for the given URL.
 func (m *Mocker) Cookies(u *url.URL) []*http.Cookie {
 	args := m.Called(u)
 	return args.Get(0).([]*http.Cookie)
 }
 
+// TestInitClient_Success verifies InitClient with a valid cookie file.
 func TestInitClient_Success(t *testing.T) {
 	// Arrange
 	domain := "https://example.com"
@@ -60,6 +64,7 @@ func TestInitClient_Success(t *testing.T) {
 	assert.IsType(t, &http.Client{}, Client)
 }
 
+// TestSetCookiesFromFile_Success verifies setCookiesFromFile with valid JSON.
 func TestSetCookiesFromFile_Success(t *testing.T) {
 	// Arrange
 	domain := "https://example.com"
@@ -115,6 +120,7 @@ func TestSetCookiesFromFile_Success(t *testing.T) {
 
 }
 
+// TestSetCookiesFromFile_FileError checks error when the cookie file cannot be opened.
 func TestSetCookiesFromFile_FileError(t *testing.T) {
 	// Arrange
 	domain := "https://example.com"
@@ -129,6 +135,7 @@ func TestSetCookiesFromFile_FileError(t *testing.T) {
 	assert.Contains(t, err.Error(), "error opening cookie file")
 }
 
+// TestSetCookiesFromFile_JSONError checks error when cookie file JSON is invalid.
 func TestSetCookiesFromFile_JSONError(t *testing.T) {
 	// Arrange
 	domain := "https://example.com"
@@ -152,6 +159,7 @@ func TestSetCookiesFromFile_JSONError(t *testing.T) {
 	assert.Contains(t, err.Error(), "error decoding JSON")
 }
 
+// TestInitClient_InvalidDomain checks error when domain cannot be parsed.
 func TestInitClient_InvalidDomain(t *testing.T) {
 	dir := t.TempDir()
 	filename := "cookies.json"
@@ -167,6 +175,7 @@ func TestInitClient_InvalidDomain(t *testing.T) {
 }
 
 // TestInitClient_DomainWithoutScheme covers setCookiesFromFile when domain has no scheme
+// TestInitClient_DomainWithoutScheme verifies InitClient accepts domain without scheme
 // (e.g. "example.com"); the code adds "https://" and parses again.
 func TestInitClient_DomainWithoutScheme(t *testing.T) {
 	defer func() { Client = nil }()
@@ -183,6 +192,7 @@ func TestInitClient_DomainWithoutScheme(t *testing.T) {
 }
 
 // TestSetCookiesFromFile_InvalidDomainEmptyHostname covers the error path when the domain
+// TestSetCookiesFromFile_InvalidDomainEmptyHostname checks error when domain
 // parses but hostname is still empty after prepending "https://".
 func TestSetCookiesFromFile_InvalidDomainEmptyHostname(t *testing.T) {
 	dir := t.TempDir()

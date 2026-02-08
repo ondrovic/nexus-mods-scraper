@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestExecuteMain_Success verifies executeMain exits without error when Execute succeeds.
 func TestExecuteMain_Success(t *testing.T) {
 	mockExecute := func() error {
 		return nil
@@ -31,6 +32,7 @@ func TestExecuteMain_Success(t *testing.T) {
 	assert.Empty(t, stderrBuf.String(), "stderr should remain empty on success")
 }
 
+// TestExecuteMain_FailureOnExecute verifies executeMain exits with code 1 and prints error to stderr.
 func TestExecuteMain_FailureOnExecute(t *testing.T) {
 	executeErr := errors.New("execute failed")
 	mockExecute := func() error {
@@ -61,6 +63,7 @@ func TestExecuteMain_FailureOnExecute(t *testing.T) {
 	assert.Contains(t, stderrBuf.String(), executeErr.Error(), "stderr should contain the error message")
 }
 
+// TestMain_CoversEntryPoint exercises main() entry point with mocked osExit.
 func TestMain_CoversEntryPoint(t *testing.T) {
 	oldOsExit := osExit
 	oldArgs := os.Args

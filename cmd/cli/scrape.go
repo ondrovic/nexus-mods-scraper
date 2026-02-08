@@ -3,6 +3,11 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"unicode"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/savioxavier/termlink"
@@ -18,28 +23,36 @@ import (
 	"github.com/ondrovic/nexus-mods-scraper/internal/utils/formatters"
 	"github.com/ondrovic/nexus-mods-scraper/internal/utils/spinners"
 	"github.com/ondrovic/nexus-mods-scraper/internal/utils/storage"
-
-	"path/filepath"
-	"strings"
-	"unicode"
 )
 
 // maxFilenameLength limits sanitized mod name length to avoid filesystem path limits.
 const maxFilenameLength = 200
 
-// sanitizeFilename removes path separators, "..", and OS-invalid characters from
-// a string intended for use in a filename. It trims whitespace and limits length.
-func sanitizeFilename(name string) string {
-	// Remove path separators and ".."
+// dotRun collapses one or more dots to a single dot; used by sanitizeFilename.
+var dotRun = regexp.MustCompile(`\.+`)
+
+// whitespaceRun collapses one or more whitespace runes to a single space; used by sanitizeFilename.
+var whitespaceRun = regexp.MustCompile(`\s+`)
+
+// sanitizeFilename removes path separators, normalizes dots and whitespace, and strips
+// OS-invalid characters from a string for use in a filename. It trims and limits length
+// to maxFilenameLength. If the result would be empty, returns a deterministic fallback
+// "file_<modID>".
+func sanitizeFilename(name string, modID int64) string {
+	// Remove path separators
 	s := strings.ReplaceAll(name, "/", "")
 	s = strings.ReplaceAll(s, "\\", "")
-	s = strings.ReplaceAll(s, "..", "")
+	// Collapse runs of '.' into a single dot
+	s = dotRun.ReplaceAllString(s, ".")
+	// Trim leading/trailing dots
+	s = strings.Trim(s, ".")
 	// Remove OS-invalid characters: : * ? " < > |
 	invalid := []rune{':', '*', '?', '"', '<', '>', '|'}
 	for _, r := range invalid {
 		s = strings.ReplaceAll(s, string(r), "")
 	}
-	// Collapse and trim whitespace
+	// Collapse consecutive whitespace to a single space and trim
+	s = whitespaceRun.ReplaceAllString(s, " ")
 	s = strings.TrimSpace(s)
 	runes := []rune(s)
 	if len(runes) > maxFilenameLength {
@@ -49,7 +62,16 @@ func sanitizeFilename(name string) string {
 	for len(runes) > 0 && unicode.IsSpace(runes[len(runes)-1]) {
 		runes = runes[:len(runes)-1]
 	}
-	return string(runes)
+	result := string(runes)
+	if result == "" {
+		return "file_" + strconv.FormatInt(modID, 10)
+	}
+	return result
+}
+
+// outputFilenameForMod returns the sanitized filename used when saving a mod's JSON (e.g. "mod name 123").
+func outputFilenameForMod(mod types.ModInfo) string {
+	return fmt.Sprintf("%s %d", strings.ToLower(sanitizeFilename(mod.Name, mod.ModID)), mod.ModID)
 }
 
 // spinnerI is the subset of spinner operations used by scrapeMod; tests may inject a mock.
@@ -180,12 +202,9 @@ func scrapeMod(
 	// On failure, we return immediately with no partial results; a best-effort mode could collect errors and continue.
 	var mods []types.ModInfo
 	var scrapeSpinnerMsg string
-	switch {
-	case len(sc.ModIDs) == 0:
-		scrapeSpinnerMsg = "No mods specified"
-	case len(sc.ModIDs) == 1:
+	if len(sc.ModIDs) == 1 {
 		scrapeSpinnerMsg = fmt.Sprintf("Scraping modID: %d for game: %s", sc.ModIDs[0], sc.GameName)
-	default:
+	} else {
 		scrapeSpinnerMsg = fmt.Sprintf("Scraping %d mods for game: %s", len(sc.ModIDs), sc.GameName)
 	}
 	if !sc.Quiet {
@@ -256,8 +275,7 @@ func scrapeMod(
 			}
 			var lastSaved string
 			for _, mod := range mods {
-				outputFilename := fmt.Sprintf("%s %d", strings.ToLower(sanitizeFilename(mod.Name)), mod.ModID)
-				item, err := exporters.SaveModInfoToJson(sc, types.Results{Mods: mod}, outputGameDirectory, outputFilename, utils.EnsureDirExists)
+				item, err := exporters.SaveModInfoToJson(sc, mod, outputGameDirectory, outputFilenameForMod(mod), utils.EnsureDirExists)
 				if err != nil {
 					saveSpinner.StopFailMessage(fmt.Sprintf("Error saving results: %v", err))
 					if stopErr := saveSpinner.StopFail(); stopErr != nil {
@@ -279,8 +297,7 @@ func scrapeMod(
 			}
 		} else {
 			for _, mod := range mods {
-				outputFilename := fmt.Sprintf("%s %d", strings.ToLower(sanitizeFilename(mod.Name)), mod.ModID)
-				if _, err := exporters.SaveModInfoToJson(sc, types.Results{Mods: mod}, outputGameDirectory, outputFilename, utils.EnsureDirExists); err != nil {
+				if _, err := exporters.SaveModInfoToJson(sc, mod, outputGameDirectory, outputFilenameForMod(mod), utils.EnsureDirExists); err != nil {
 					return err
 				}
 			}

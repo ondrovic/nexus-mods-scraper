@@ -21,6 +21,8 @@ var RootCmd = &cobra.Command{
 	Short: "A CLI tool to scrape https://nexusmods.com mods and return the information in JSON format",
 }
 
+// init registers the root command's persistent flags (e.g. quiet) and the PersistentPreRunE
+// hook that clears the terminal unless quiet mode is set.
 func init() {
 	RootCmd.PersistentFlags().BoolP("quiet", "q", false, "Suppress spinner and status output (for piping to jq)")
 	_ = viper.BindPFlags(RootCmd.PersistentFlags())
