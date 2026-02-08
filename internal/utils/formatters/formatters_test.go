@@ -1,6 +1,7 @@
 package formatters
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -126,6 +127,26 @@ func TestFormatResultsAsJson(t *testing.T) {
 
 	if result != expected {
 		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
+// Test for FormatResultsAsJson marshal error path
+func TestFormatResultsAsJson_MarshalError(t *testing.T) {
+	old := marshalIndent
+	marshalIndent = func(_ interface{}, _, _ string) ([]byte, error) {
+		return nil, errors.New("injected marshal error")
+	}
+	defer func() { marshalIndent = old }()
+
+	result, err := FormatResultsAsJson(types.ModInfo{Name: "Test"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if result != "" {
+		t.Errorf("expected empty string on error, got %q", result)
+	}
+	if !strings.Contains(err.Error(), "failed to marshal") {
+		t.Errorf("expected error to mention marshal failure, got %v", err)
 	}
 }
 

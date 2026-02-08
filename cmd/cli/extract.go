@@ -42,7 +42,7 @@ func init() {
 			storeProvider := func() []kooky.CookieStore {
 				return kooky.FindAllCookieStores(context.TODO())
 			}
-			return ExtractCookies(cmd, args, storeProvider)
+			return ExtractCookies(cmd, args, storeProvider, nil)
 		},
 	}
 
@@ -65,10 +65,18 @@ func initExtractFlags(cmd *cobra.Command) {
 	cli.RegisterFlag(cmd, "cookie-validator-test-path", "", extractors.DefaultCookieValidatorTestPath, "Path used for cookie validation request", &options.CookieValidatorTestPath)
 }
 
+// ExtractBehavior allows injecting interactive prompts for testing. When nil (or a field
+// is nil), the real extractors are used. Pass from tests to avoid stdin and control outcomes.
+type ExtractBehavior struct {
+	SelectMethod     func() (string, error)
+	InteractiveInput func(cookieNames []string) (map[string]string, error)
+	ConfirmAction    func(prompt string) bool
+}
+
 // ExtractCookies extracts cookies from the specified domain using the valid cookie names,
 // then saves them as a JSON file in the designated output directory. Returns an error
-// if cookie extraction or saving fails.
-func ExtractCookies(cmd *cobra.Command, args []string, storeProvider func() []kooky.CookieStore) error {
+// if cookie extraction or saving fails. behavior may be nil to use default interactive prompts.
+func ExtractCookies(cmd *cobra.Command, args []string, storeProvider func() []kooky.CookieStore, behavior *ExtractBehavior) error {
 	domain := formatters.CookieDomain(options.BaseUrl)
 	sessionCookies := viper.GetStringSlice("valid-cookie-names")
 	interactive := viper.GetBool("interactive")
@@ -80,18 +88,33 @@ func ExtractCookies(cmd *cobra.Command, args []string, storeProvider func() []ko
 		testPath = extractors.DefaultCookieValidatorTestPath
 	}
 
+	selectMethod := extractors.SelectExtractionMethod
+	interactiveInput := extractors.InteractiveCookieInput
+	confirmAction := extractors.ConfirmAction
+	if behavior != nil {
+		if behavior.SelectMethod != nil {
+			selectMethod = behavior.SelectMethod
+		}
+		if behavior.InteractiveInput != nil {
+			interactiveInput = behavior.InteractiveInput
+		}
+		if behavior.ConfirmAction != nil {
+			confirmAction = behavior.ConfirmAction
+		}
+	}
+
 	var finalCookies map[string]string
 	var err error
 
 	// Interactive mode - let user choose
 	if interactive {
-		method, err := extractors.SelectExtractionMethod()
+		method, err := selectMethod()
 		if err != nil {
 			return err
 		}
 
 		if method == "manual" {
-			finalCookies, err = extractors.InteractiveCookieInput(sessionCookies)
+			finalCookies, err = interactiveInput(sessionCookies)
 			if err != nil {
 				return err
 			}
@@ -100,8 +123,8 @@ func ExtractCookies(cmd *cobra.Command, args []string, storeProvider func() []ko
 			finalCookies, err = performEnhancedExtraction(domain, sessionCookies, storeProvider, showAllBrowsers)
 			if err != nil {
 				fmt.Printf("\n❌ Automatic extraction failed: %v\n", err)
-				if extractors.ConfirmAction("\nWould you like to enter cookies manually?") {
-					finalCookies, err = extractors.InteractiveCookieInput(sessionCookies)
+				if confirmAction("\nWould you like to enter cookies manually?") {
+					finalCookies, err = interactiveInput(sessionCookies)
 					if err != nil {
 						return err
 					}
@@ -128,7 +151,7 @@ func ExtractCookies(cmd *cobra.Command, args []string, storeProvider func() []ko
 			} else {
 				fmt.Println("⚠ Warning: Cookie validation failed")
 			}
-			if interactive && !extractors.ConfirmAction("Continue anyway?") {
+			if interactive && !confirmAction("Continue anyway?") {
 				return fmt.Errorf("cookie validation failed")
 			}
 		} else {

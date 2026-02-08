@@ -1,3 +1,4 @@
+// Package cli provides Cobra flag registration helpers.
 package cli
 
 import (

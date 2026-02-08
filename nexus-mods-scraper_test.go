@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"os"
 	"testing"
 
@@ -9,136 +11,72 @@ import (
 )
 
 func TestExecuteMain_Success(t *testing.T) {
-	// Mock the dependencies
-	mockClearTerminal := func(_ interface{}) error {
-		return nil
-	}
 	mockExecute := func() error {
 		return nil
 	}
 
-	// Act: Call `executeMain` and verify it succeeds
-	executeMain(mockClearTerminal, mockExecute)
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	assert.NoError(t, err)
+	defer r.Close()
+	os.Stderr = w
 
-	// Since `executeMain` doesn't return anything, you would assert no panics/errors occurred
-	assert.True(t, true, "executeMain should complete without errors")
-}
+	executeMain(mockExecute)
 
-func TestExecuteMain_FailureOnClearTerminal(t *testing.T) {
-	// Mock `ClearTerminalScreen` to return an error
-	mockClearTerminal := func(_ interface{}) error {
-		return errors.New("failed to clear terminal")
-	}
+	os.Stderr = oldStderr
+	assert.NoError(t, w.Close())
+	var stderrBuf bytes.Buffer
+	_, _ = io.Copy(&stderrBuf, r)
 
-	// Mock `executeFunc` to ensure it isn't called
-	mockExecute := func() error {
-		t.Log("Execute should not be called")
-		return nil
-	}
-
-	// Act: Call `executeMain` and verify it handles the error
-	executeMain(mockClearTerminal, mockExecute)
-
-	// Again, since `executeMain` doesn't return anything, you assert that no panic occurred
-	assert.True(t, true, "executeMain should handle the terminal clearing error gracefully")
+	assert.Empty(t, stderrBuf.String(), "stderr should remain empty on success")
 }
 
 func TestExecuteMain_FailureOnExecute(t *testing.T) {
-	// Mock `ClearTerminalScreen` to succeed
-	mockClearTerminal := func(_ interface{}) error {
-		return nil
-	}
-
-	// Mock `executeFunc` to return an error
+	executeErr := errors.New("execute failed")
 	mockExecute := func() error {
-		return errors.New("execution failed")
+		return executeErr
 	}
 
-	// Act: Call `executeMain` and verify it handles the error
-	executeMain(mockClearTerminal, mockExecute)
-
-	// No panics/errors should occur, and the execution error should be gracefully handled
-	assert.True(t, true, "executeMain should handle the execution error gracefully")
-}
-
-func TestIsQuietMode_WithShortFlag(t *testing.T) {
-	// Save original args
-	oldArgs := os.Args
-	defer func() { os.Args = oldArgs }()
-
-	// Set args with -q flag
-	os.Args = []string{"cmd", "scrape", "-q", "game", "123"}
-
-	result := isQuietMode()
-	assert.True(t, result, "isQuietMode should return true with -q flag")
-}
-
-func TestIsQuietMode_WithLongFlag(t *testing.T) {
-	// Save original args
-	oldArgs := os.Args
-	defer func() { os.Args = oldArgs }()
-
-	// Set args with --quiet flag
-	os.Args = []string{"cmd", "scrape", "--quiet", "game", "123"}
-
-	result := isQuietMode()
-	assert.True(t, result, "isQuietMode should return true with --quiet flag")
-}
-
-func TestIsQuietMode_WithoutFlag(t *testing.T) {
-	// Save original args
-	oldArgs := os.Args
-	defer func() { os.Args = oldArgs }()
-
-	// Set args without quiet flag
-	os.Args = []string{"cmd", "scrape", "game", "123"}
-
-	result := isQuietMode()
-	assert.False(t, result, "isQuietMode should return false without quiet flag")
-}
-
-func TestRun_QuietModeSkipsClearScreen(t *testing.T) {
-	// Save original args
-	oldArgs := os.Args
-	defer func() { os.Args = oldArgs }()
-
-	// Set args with -q flag
-	os.Args = []string{"cmd", "scrape", "-q", "game", "123"}
-
-	clearScreenCalled := false
-	mockClearTerminal := func(_ interface{}) error {
-		clearScreenCalled = true
-		return nil
+	oldOsExit := osExit
+	exitCode := -1
+	osExit = func(code int) {
+		exitCode = code
 	}
-	mockExecute := func() error {
-		return nil
-	}
+	defer func() { osExit = oldOsExit }()
 
-	err := run(mockClearTerminal, mockExecute)
-
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
 	assert.NoError(t, err)
-	assert.False(t, clearScreenCalled, "Clear screen should not be called in quiet mode")
+	defer r.Close()
+	os.Stderr = w
+	defer func() { os.Stderr = oldStderr }()
+
+	executeMain(mockExecute)
+
+	assert.NoError(t, w.Close())
+	var stderrBuf bytes.Buffer
+	_, _ = io.Copy(&stderrBuf, r)
+
+	assert.Equal(t, 1, exitCode, "executeMain should have invoked exit with code 1")
+	assert.Contains(t, stderrBuf.String(), executeErr.Error(), "stderr should contain the error message")
 }
 
-func TestRun_NormalModeClearsScreen(t *testing.T) {
-	// Save original args
+func TestMain_CoversEntryPoint(t *testing.T) {
+	oldOsExit := osExit
 	oldArgs := os.Args
-	defer func() { os.Args = oldArgs }()
+	defer func() {
+		osExit = oldOsExit
+		os.Args = oldArgs
+	}()
 
-	// Set args without quiet flag
-	os.Args = []string{"cmd", "scrape", "game", "123"}
-
-	clearScreenCalled := false
-	mockClearTerminal := func(_ interface{}) error {
-		clearScreenCalled = true
-		return nil
+	exitCode := -1
+	osExit = func(code int) {
+		exitCode = code
 	}
-	mockExecute := func() error {
-		return nil
-	}
+	// Run with --help so Execute() returns quickly without side effects.
+	os.Args = []string{"nexus-mods-scraper", "--help"}
 
-	err := run(mockClearTerminal, mockExecute)
+	main()
 
-	assert.NoError(t, err)
-	assert.True(t, clearScreenCalled, "Clear screen should be called in normal mode")
+	assert.Equal(t, -1, exitCode, "main with --help should not call exit (success path)")
 }

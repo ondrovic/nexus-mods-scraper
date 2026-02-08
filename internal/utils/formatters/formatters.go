@@ -1,3 +1,4 @@
+// Package formatters provides text cleaning, JSON formatting, and URL/domain helpers.
 package formatters
 
 import (
@@ -73,10 +74,13 @@ func CookieDomain(url string) string {
 	return url // Fallback in case regex doesn't match
 }
 
+// marshalIndent is used by FormatResultsAsJson; tests may override to simulate marshal failure.
+var marshalIndent = json.MarshalIndent
+
 // FormatResultsAsJson takes a ModInfo object, formats it as a pretty-printed JSON
 // string, and returns the result. If marshalling fails, it returns an error.
 func FormatResultsAsJson(mods types.ModInfo) (string, error) {
-	jsonData, err := json.MarshalIndent(mods, "", "    ")
+	jsonData, err := marshalIndent(mods, "", "    ")
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal mod information: %w", err)
 	}

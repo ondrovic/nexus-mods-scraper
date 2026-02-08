@@ -1,3 +1,4 @@
+// Package httpclient provides the HTTP client and cookie jar initialization for the scraper.
 package httpclient
 
 import (

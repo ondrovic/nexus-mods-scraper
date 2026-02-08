@@ -36,41 +36,46 @@ func TestInteractiveCookieInputWithIO_ReadError(t *testing.T) {
 
 func TestPromptForCookieSelectionWithIO_NoStores(t *testing.T) {
 	var out bytes.Buffer
-	idx, err := promptForCookieSelectionWithIO(strings.NewReader(""), &out, nil)
+	idx, autoSelect, err := promptForCookieSelectionWithIO(strings.NewReader(""), &out, nil)
 	assert.Error(t, err)
 	assert.Equal(t, -1, idx)
+	assert.False(t, autoSelect)
 	assert.Contains(t, err.Error(), "no cookie stores available")
 }
 
 func TestPromptForCookieSelectionWithIO_SingleStore(t *testing.T) {
 	var out bytes.Buffer
-	idx, err := promptForCookieSelectionWithIO(strings.NewReader(""), &out, []string{"Chrome"})
+	idx, autoSelect, err := promptForCookieSelectionWithIO(strings.NewReader(""), &out, []string{"Chrome"})
 	require.NoError(t, err)
 	assert.Equal(t, 0, idx)
+	assert.False(t, autoSelect)
 }
 
 func TestPromptForCookieSelectionWithIO_ValidChoice(t *testing.T) {
 	in := strings.NewReader("2\n")
 	var out bytes.Buffer
-	idx, err := promptForCookieSelectionWithIO(in, &out, []string{"Chrome", "Firefox"})
+	idx, autoSelect, err := promptForCookieSelectionWithIO(in, &out, []string{"Chrome", "Firefox"})
 	require.NoError(t, err)
 	assert.Equal(t, 1, idx)
+	assert.False(t, autoSelect)
 }
 
 func TestPromptForCookieSelectionWithIO_AutoSelect(t *testing.T) {
 	in := strings.NewReader("\n")
 	var out bytes.Buffer
-	idx, err := promptForCookieSelectionWithIO(in, &out, []string{"Chrome", "Firefox"})
+	idx, autoSelect, err := promptForCookieSelectionWithIO(in, &out, []string{"Chrome", "Firefox"})
 	require.NoError(t, err)
-	assert.Equal(t, -1, idx)
+	assert.True(t, autoSelect)
+	assert.Equal(t, 0, idx) // index is 0 when autoSelect is true
 }
 
 func TestPromptForCookieSelectionWithIO_InvalidSelection(t *testing.T) {
 	in := strings.NewReader("x\n")
 	var out bytes.Buffer
-	idx, err := promptForCookieSelectionWithIO(in, &out, []string{"Chrome", "Firefox"})
+	idx, autoSelect, err := promptForCookieSelectionWithIO(in, &out, []string{"Chrome", "Firefox"})
 	assert.Error(t, err)
 	assert.Equal(t, -1, idx)
+	assert.False(t, autoSelect)
 	assert.Contains(t, err.Error(), "invalid selection")
 }
 
@@ -98,9 +103,10 @@ func TestConfirmActionWithIO_ReadError(t *testing.T) {
 
 func TestPromptForCookieSelectionWithIO_ReadError(t *testing.T) {
 	var out bytes.Buffer
-	idx, err := promptForCookieSelectionWithIO(&errReader{}, &out, []string{"Chrome", "Firefox"})
+	idx, autoSelect, err := promptForCookieSelectionWithIO(&errReader{}, &out, []string{"Chrome", "Firefox"})
 	assert.Error(t, err)
 	assert.Equal(t, -1, idx)
+	assert.False(t, autoSelect)
 	assert.Contains(t, err.Error(), "failed to read input")
 }
 
@@ -158,9 +164,10 @@ func TestPromptForCookieSelection_WithPipedStdin(t *testing.T) {
 		_, _ = w.WriteString("2\n")
 		_ = w.Close()
 	}()
-	idx, err := PromptForCookieSelection([]string{"Chrome", "Firefox"})
+	idx, autoSelect, err := PromptForCookieSelection([]string{"Chrome", "Firefox"})
 	require.NoError(t, err)
 	assert.Equal(t, 1, idx)
+	assert.False(t, autoSelect)
 }
 
 func TestConfirmAction_WithPipedStdin(t *testing.T) {

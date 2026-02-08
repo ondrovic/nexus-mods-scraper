@@ -1,3 +1,4 @@
+// Package spinners provides terminal spinners for progress feedback.
 package spinners
 
 import (
@@ -9,6 +10,14 @@ import (
 
 	"github.com/theckman/yacspin"
 )
+
+// newSpinner is used by CreateSpinner; may be overridden in tests to simulate failure.
+var newSpinner = func(cfg yacspin.Config) (*yacspin.Spinner, error) {
+	return yacspin.New(cfg)
+}
+
+// processExit is called to exit the process; used for both error (code 1) and clean/signal (code 0) exits. Tests may override to avoid os.Exit.
+var processExit = func(code int) { os.Exit(code) }
 
 // CreateSpinner initializes and returns a yacspin spinner with the provided
 // start and stop messages, characters, and failure configurations.
@@ -28,10 +37,11 @@ func CreateSpinner(startMessage, stopCharacter, stopMessage, stopFailCharacter, 
 		StopFailMessage:   stopFailMessage,
 	}
 
-	s, err := yacspin.New(cfg)
+	s, err := newSpinner(cfg)
 	if err != nil {
 		fmt.Printf("failed to create spinner: %v\n", err)
-		os.Exit(1)
+		processExit(1)
+		return nil // unreachable in production; satisfies compiler when processExit is stubbed in tests
 	}
 
 	return s
@@ -52,6 +62,6 @@ func stopOnSignal(spinner *yacspin.Spinner) {
 		// ignoring error intentionally
 		_ = spinner.StopFail()
 
-		os.Exit(0)
+		processExit(0)
 	}()
 }

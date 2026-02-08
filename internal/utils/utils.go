@@ -1,3 +1,4 @@
+// Package utils provides concurrency and filesystem helpers.
 package utils
 
 import (

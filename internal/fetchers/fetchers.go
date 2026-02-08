@@ -1,3 +1,4 @@
+// Package fetchers fetches mod pages and file lists from Nexus Mods.
 package fetchers
 
 import (
