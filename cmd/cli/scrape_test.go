@@ -120,6 +120,8 @@ func TestSanitizeFilename(t *testing.T) {
 		{"truncation at max length", strings.Repeat("a", 250), 99, strings.Repeat("a", maxFilenameLength)},
 		{"truncation then trim trailing space", strings.Repeat("x", 198) + "   ", 1, strings.Repeat("x", 198)},
 		{"truncation then trim multiple trailing spaces", strings.Repeat("a", 197) + "     ", 2, strings.Repeat("a", 197)},
+		// After collapse/trim, length must be >200 so truncation runs; then rune[199] is space so trim loop runs
+		{"truncation then trim single trailing space", strings.Repeat("x", 199) + " x", 1, strings.Repeat("x", 199)},
 		{"long spaces only trim to empty fallback", strings.Repeat(" ", 200), 7, "file_7"},
 	}
 	for _, tt := range tests {
