@@ -101,7 +101,18 @@ var (
 	fetchDocumentFunc = fetchers.FetchDocument
 	// formatResultsFromModsFunc is used when displaying results for one or more mods.
 	formatResultsFromModsFunc = formatters.FormatResultsAsJsonFromMods
+	// bindPFlagsForScrape binds command flags to Viper; tests may override to test panic path.
+	bindPFlagsForScrape = viper.BindPFlags
+	// saveModInfoToJsonFunc saves a mod's JSON to disk; tests may override to simulate save failure.
+	saveModInfoToJsonFunc = exporters.SaveModInfoToJson
 )
+
+// mustBindScrapeFlags binds the scrape command's flags to Viper, or panics on failure.
+func mustBindScrapeFlags(cmd *cobra.Command) {
+	if err := bindPFlagsForScrape(cmd.Flags()); err != nil {
+		panic("scrape: bind flags: " + err.Error())
+	}
+}
 
 // init initializes the scrape command with usage, description, and argument validation.
 // It binds flags using Viper and adds the command to the root command for execution.
@@ -115,9 +126,7 @@ func init() {
 	}
 
 	initScrapeFlags(scrapeCmd)
-	if err := viper.BindPFlags(scrapeCmd.Flags()); err != nil {
-		panic("scrape: bind flags: " + err.Error())
-	}
+	mustBindScrapeFlags(scrapeCmd)
 	RootCmd.AddCommand(scrapeCmd)
 }
 
@@ -278,7 +287,7 @@ func scrapeMod(
 			}
 			var lastSaved string
 			for _, mod := range mods {
-				item, err := exporters.SaveModInfoToJson(sc, mod, outputGameDirectory, outputFilenameForMod(mod), utils.EnsureDirExists)
+				item, err := saveModInfoToJsonFunc(sc, mod, outputGameDirectory, outputFilenameForMod(mod), utils.EnsureDirExists)
 				if err != nil {
 					saveSpinner.StopFailMessage(fmt.Sprintf("Error saving results: %v", err))
 					if stopErr := saveSpinner.StopFail(); stopErr != nil {
@@ -300,7 +309,7 @@ func scrapeMod(
 			}
 		} else {
 			for _, mod := range mods {
-				if _, err := exporters.SaveModInfoToJson(sc, mod, outputGameDirectory, outputFilenameForMod(mod), utils.EnsureDirExists); err != nil {
+				if _, err := saveModInfoToJsonFunc(sc, mod, outputGameDirectory, outputFilenameForMod(mod), utils.EnsureDirExists); err != nil {
 					return err
 				}
 			}

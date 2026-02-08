@@ -15,6 +15,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/ondrovic/nexus-mods-scraper/internal/types"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -118,6 +119,7 @@ func TestSanitizeFilename(t *testing.T) {
 		{"empty after sanitize", "..:/\\", 42, "file_42"},
 		{"truncation at max length", strings.Repeat("a", 250), 99, strings.Repeat("a", maxFilenameLength)},
 		{"truncation then trim trailing space", strings.Repeat("x", 198) + "   ", 1, strings.Repeat("x", 198)},
+		{"truncation then trim multiple trailing spaces", strings.Repeat("a", 197) + "     ", 2, strings.Repeat("a", 197)},
 		{"long spaces only trim to empty fallback", strings.Repeat(" ", 200), 7, "file_7"},
 	}
 	for _, tt := range tests {
@@ -212,6 +214,24 @@ func TestRun_EmptyModIDsDefensive(t *testing.T) {
 	err := mockCmd.Execute()
 	assert.Error(t, err)
 	assert.EqualError(t, err, "no mod IDs specified")
+}
+
+// TestMustBindScrapeFlags_PanicWhenBindFails covers the panic path when bindPFlagsForScrape returns an error.
+func TestMustBindScrapeFlags_PanicWhenBindFails(t *testing.T) {
+	orig := bindPFlagsForScrape
+	defer func() { bindPFlagsForScrape = orig }()
+	bindPFlagsForScrape = func(*pflag.FlagSet) error { return errors.New("bind failed") }
+
+	mockCmd := &cobra.Command{Use: "scrape"}
+	initScrapeFlags(mockCmd)
+
+	var panicked interface{}
+	func() {
+		defer func() { panicked = recover() }()
+		mustBindScrapeFlags(mockCmd)
+	}()
+	require.NotNil(t, panicked)
+	assert.Contains(t, panicked.(string), "scrape: bind flags: bind failed")
 }
 
 // TestRun_Success covers the path in run() that builds CliFlags from viper and args
@@ -1138,6 +1158,51 @@ func TestScrapeMod_SaveSuccess_NonQuiet(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestScrapeMod_SaveSuccess_MultipleMods_NonQuiet covers the multi-file save success message (Saved N file(s) to ...).
+func TestScrapeMod_SaveSuccess_MultipleMods_NonQuiet(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
+	outputDir := filepath.Join(tempDir, "output")
+	require.NoError(t, os.Mkdir(outputDir, 0755))
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  false,
+		GameName:        "game",
+		ModIDs:          []int64{1234, 5678},
+		Quiet:           false,
+		SaveResults:     true,
+		OutputDirectory: outputDir,
+	}
+	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+	assert.NoError(t, err)
+
+	gameDir := filepath.Join(outputDir, "game")
+	entries, err := os.ReadDir(gameDir)
+	require.NoError(t, err)
+	var jsonFiles []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+			jsonFiles = append(jsonFiles, e.Name())
+		}
+	}
+	require.Len(t, jsonFiles, 2, "expected exactly 2 saved JSON files for mod IDs 1234 and 5678")
+	has1234 := false
+	has5678 := false
+	for _, name := range jsonFiles {
+		if strings.Contains(name, "1234") {
+			has1234 = true
+		}
+		if strings.Contains(name, "5678") {
+			has5678 = true
+		}
+	}
+	assert.True(t, has1234, "expected a result file for ModID 1234")
+	assert.True(t, has5678, "expected a result file for ModID 5678")
+}
+
 // TestScrapeMod_SaveSuccess_StopReturnsError covers saveSpinner.Stop() returning error (if stopErr body).
 func TestScrapeMod_SaveSuccess_StopReturnsError(t *testing.T) {
 	tempDir := t.TempDir()
@@ -1171,6 +1236,35 @@ func TestScrapeMod_SaveSuccess_StopReturnsError(t *testing.T) {
 	stderr := captureStderr(t, func() { err = scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument) })
 	assert.NoError(t, err)
 	assert.Contains(t, stderr, "spinner stop error")
+}
+
+// TestScrapeMod_SaveFails_QuietMode covers the quiet save path when saveModInfoToJsonFunc returns an error (return err).
+func TestScrapeMod_SaveFails_QuietMode(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
+	outputDir := filepath.Join(tempDir, "output")
+	require.NoError(t, os.Mkdir(outputDir, 0755))
+
+	orig := saveModInfoToJsonFunc
+	defer func() { saveModInfoToJsonFunc = orig }()
+	saveModInfoToJsonFunc = func(types.CliFlags, interface{}, string, string, func(string) error) (string, error) {
+		return "", assert.AnError
+	}
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  false,
+		GameName:        "game",
+		ModIDs:          []int64{1234},
+		Quiet:           true,
+		SaveResults:     true,
+		OutputDirectory: outputDir,
+	}
+	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, assert.AnError)
 }
 
 // TestScrapeMod_SaveSuccess_StopReturnsError_WithDisplay covers saveSpinner.Stop() error (line 301) when display+save (4 spinners).
