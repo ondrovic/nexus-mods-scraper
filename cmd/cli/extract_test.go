@@ -121,6 +121,7 @@ func withExtractTestState(t *testing.T) (cleanup func()) {
 	origViperInteractive := viper.Get("interactive")
 	origViperNoValidate := viper.Get("no-validate")
 	origViperTestPath := viper.Get("cookie-validator-test-path")
+	origViperQuiet := viper.Get("quiet")
 	return func() {
 		options.BaseUrl = origBaseUrl
 		options.OutputDirectory = origOutputDir
@@ -131,6 +132,7 @@ func withExtractTestState(t *testing.T) (cleanup func()) {
 		viper.Set("interactive", origViperInteractive)
 		viper.Set("no-validate", origViperNoValidate)
 		viper.Set("cookie-validator-test-path", origViperTestPath)
+		viper.Set("quiet", origViperQuiet)
 	}
 }
 

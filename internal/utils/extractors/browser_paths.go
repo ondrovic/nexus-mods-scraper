@@ -195,35 +195,44 @@ func getLinuxBrowserPaths(home string) []browserPath {
 		paths = append(paths, findChromiumProfiles(cr.path, cr.browser)...)
 	}
 
-	// Brave - additional locations
-	braveRoots := []string{
-		filepath.Join(home, ".config", "BraveSoftware", "Brave-Browser"),
-		filepath.Join(home, ".config", "BraveSoftware", "Brave-Browser-Beta"),
-		filepath.Join(home, ".config", "BraveSoftware", "Brave-Browser-Nightly"),
-		filepath.Join(home, ".var", "app", "com.brave.Browser", "config", "BraveSoftware", "Brave-Browser"),
+	// Brave - additional locations (each variant gets a distinct label)
+	braveRoots := []struct {
+		path    string
+		browser string
+	}{
+		{filepath.Join(home, ".config", "BraveSoftware", "Brave-Browser"), "brave"},
+		{filepath.Join(home, ".config", "BraveSoftware", "Brave-Browser-Beta"), "brave-beta"},
+		{filepath.Join(home, ".config", "BraveSoftware", "Brave-Browser-Nightly"), "brave-nightly"},
+		{filepath.Join(home, ".var", "app", "com.brave.Browser", "config", "BraveSoftware", "Brave-Browser"), "brave"},
 	}
-	for _, root := range braveRoots {
-		paths = append(paths, findChromiumProfiles(root, "brave")...)
-	}
-
-	// Edge - additional locations
-	edgeRoots := []string{
-		filepath.Join(home, ".config", "microsoft-edge"),
-		filepath.Join(home, ".config", "microsoft-edge-beta"),
-		filepath.Join(home, ".config", "microsoft-edge-dev"),
-		filepath.Join(home, ".var", "app", "com.microsoft.Edge", "config", "microsoft-edge"),
-	}
-	for _, root := range edgeRoots {
-		paths = append(paths, findChromiumProfiles(root, "edge")...)
+	for _, br := range braveRoots {
+		paths = append(paths, findChromiumProfiles(br.path, br.browser)...)
 	}
 
-	// Vivaldi
-	vivaldiRoots := []string{
-		filepath.Join(home, ".config", "vivaldi"),
-		filepath.Join(home, ".config", "vivaldi-snapshot"),
+	// Edge - additional locations (each variant gets a distinct label)
+	edgeRoots := []struct {
+		path    string
+		browser string
+	}{
+		{filepath.Join(home, ".config", "microsoft-edge"), "edge"},
+		{filepath.Join(home, ".config", "microsoft-edge-beta"), "edge-beta"},
+		{filepath.Join(home, ".config", "microsoft-edge-dev"), "edge-dev"},
+		{filepath.Join(home, ".var", "app", "com.microsoft.Edge", "config", "microsoft-edge"), "edge"},
 	}
-	for _, root := range vivaldiRoots {
-		paths = append(paths, findChromiumProfiles(root, "vivaldi")...)
+	for _, er := range edgeRoots {
+		paths = append(paths, findChromiumProfiles(er.path, er.browser)...)
+	}
+
+	// Vivaldi (each variant gets a distinct label)
+	vivaldiRoots := []struct {
+		path    string
+		browser string
+	}{
+		{filepath.Join(home, ".config", "vivaldi"), "vivaldi"},
+		{filepath.Join(home, ".config", "vivaldi-snapshot"), "vivaldi-snapshot"},
+	}
+	for _, vr := range vivaldiRoots {
+		paths = append(paths, findChromiumProfiles(vr.path, vr.browser)...)
 	}
 
 	// Opera
