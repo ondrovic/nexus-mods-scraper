@@ -3,6 +3,7 @@ package utils
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -57,12 +58,8 @@ func TestConcurrentFetch_MultipleTasksFail(t *testing.T) {
 
 // TestEnsureDirExists_DirAlreadyExists verifies no error when directory exists.
 func TestEnsureDirExists_DirAlreadyExists(t *testing.T) {
-	// Arrange
-	existingDir := "existingDir"
-	if err := os.Mkdir(existingDir, os.ModePerm); err != nil {
-		t.Fatalf("setup: create test dir: %v", err)
-	}
-	defer os.Remove(existingDir) // Clean up after test
+	// Arrange: t.TempDir() already exists and is cleaned up by the test framework
+	existingDir := t.TempDir()
 
 	// Act
 	err := EnsureDirExists(existingDir)
@@ -75,9 +72,8 @@ func TestEnsureDirExists_DirAlreadyExists(t *testing.T) {
 
 // TestEnsureDirExists_DirDoesNotExist verifies directory is created when missing.
 func TestEnsureDirExists_DirDoesNotExist(t *testing.T) {
-	// Arrange
-	newDir := "newDir"
-	defer os.Remove(newDir) // Clean up after test
+	// Arrange: path under temp dir that does not exist yet; temp dir is cleaned up automatically
+	newDir := filepath.Join(t.TempDir(), "newDir")
 
 	// Act
 	err := EnsureDirExists(newDir)

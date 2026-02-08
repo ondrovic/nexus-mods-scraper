@@ -93,33 +93,14 @@ func TestSetCookiesFromFile_Success(t *testing.T) {
 	// Create the URL for the domain
 	u, _ := url.Parse(domain)
 
-	// Create a mock CookieJar and mock its behavior
-	mockJar := new(Mocker)
-	mockClient := &http.Client{Jar: mockJar}
-	Client = mockClient
-
-	// Create the mock cookies to be returned
-	mockCookies := []*http.Cookie{
-		{
-			Name:  "session",
-			Value: "1234",
-		},
-	}
-
-	// Mock the SetCookies behavior, ensuring we capture the cookies argument
-	mockJar.On("SetCookies", u, mock.MatchedBy(func(cookies []*http.Cookie) bool {
-		return len(cookies) == 1 && cookies[0].Name == "session" && cookies[0].Value == "1234"
-	})).Return()
-
-	// Mock the Cookies behavior to return the mock cookies
-	mockJar.On("Cookies", u).Return(mockCookies)
-
 	// Act
 	err = InitClient(domain, dir, filename)
 	assert.NoError(t, err)
 
-	// Assert
-	cookies := mockJar.Cookies(u)
+	// Assert: verify cookies were set on the real jar
+	realClient, ok := Client.(*http.Client)
+	require.True(t, ok)
+	cookies := realClient.Jar.Cookies(u)
 	assert.Len(t, cookies, 1)
 	assert.Equal(t, "session", cookies[0].Name)
 	assert.Equal(t, "1234", cookies[0].Value)
