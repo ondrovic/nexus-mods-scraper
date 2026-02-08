@@ -5,10 +5,9 @@ import (
 	"time"
 )
 
-// cli related.
 // CliFlags defines the structure for command-line flags, including options such as
 // the base URL, cookie directory, cookie file, display and save result flags, game name,
-// mod ID, output directory, and valid cookies for the operation.
+// mod IDs (comma-separated from CLI), output directory, and valid cookies for the operation.
 type CliFlags struct {
 	BaseUrl                   string
 	CookieDirectory           string
@@ -17,7 +16,7 @@ type CliFlags struct {
 	DisplayResults            bool
 	GameName                  string
 	Interactive               bool
-	ModID                     int64
+	ModIDs                    []int64
 	NoValidate                bool
 	OutputDirectory           string
 	Quiet                     bool

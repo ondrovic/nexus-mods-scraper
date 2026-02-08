@@ -27,8 +27,24 @@ func DisplayResults(sc types.CliFlags, results types.Results, formatResultsFunc 
 		return nil
 	}
 
-	formatters.PrintPrettyJson(jsonResults)
-	return nil
+	return formatters.PrintPrettyJson(jsonResults)
+}
+
+// DisplayResultsFromMods formats and displays a slice of mod results. It takes command-line
+// flags, the mods to display, and a formatting function that accepts []ModInfo. Returns an
+// error if formatting fails.
+func DisplayResultsFromMods(sc types.CliFlags, mods []types.ModInfo, formatResultsFunc func([]types.ModInfo) (string, error)) error {
+	jsonResults, err := formatResultsFunc(mods)
+	if err != nil {
+		return fmt.Errorf("error while attempting to format results: %v", err)
+	}
+
+	if sc.Quiet {
+		fmt.Println(jsonResults)
+		return nil
+	}
+
+	return formatters.PrintPrettyJson(jsonResults)
 }
 
 // SaveCookiesToJson saves the provided cookie data as a JSON file in the specified directory.

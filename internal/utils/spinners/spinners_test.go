@@ -12,6 +12,7 @@ import (
 )
 
 
+// TestCreateSpinner_StartAndStop verifies spinner start and stop behavior.
 func TestCreateSpinner_StartAndStop(t *testing.T) {
 	// Arrange
 	startMessage := "Starting..."
@@ -41,6 +42,7 @@ func TestCreateSpinner_StartAndStop(t *testing.T) {
 	}
 }
 
+// TestStopOnSignal_Interrupt verifies spinner stops on interrupt signal.
 func TestStopOnSignal_Interrupt(t *testing.T) {
 	// Arrange
 	spinner := CreateSpinner("Starting...", "✔", "Completed", "✘", "Failed")
@@ -72,6 +74,7 @@ func TestStopOnSignal_Interrupt(t *testing.T) {
 	}
 }
 
+// TestCreateSpinner_StopFail verifies StopFail behavior.
 func TestCreateSpinner_StopFail(t *testing.T) {
 	// Arrange
 	spinner := CreateSpinner("Processing...", "✔", "Done", "✘", "Error occurred")
@@ -92,6 +95,7 @@ func TestCreateSpinner_StopFail(t *testing.T) {
 	}
 }
 
+// TestCreateSpinner_StopMessage verifies StopMessage and Stop success path.
 func TestCreateSpinner_StopMessage(t *testing.T) {
 	// Arrange
 	spinner := CreateSpinner("Processing...", "✔", "Done", "✘", "Error occurred")

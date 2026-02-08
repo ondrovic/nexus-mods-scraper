@@ -77,9 +77,29 @@ func CookieDomain(url string) string {
 // marshalIndent is used by FormatResultsAsJson; tests may override to simulate marshal failure.
 var marshalIndent = json.MarshalIndent
 
+// formatterMarshal is used by PrintPrettyJson; tests may override to simulate formatter marshal failure.
+var formatterMarshal = func(f *colorjson.Formatter, obj interface{}) ([]byte, error) { return f.Marshal(obj) }
+
 // FormatResultsAsJson takes a ModInfo object, formats it as a pretty-printed JSON
 // string, and returns the result. If marshalling fails, it returns an error.
 func FormatResultsAsJson(mods types.ModInfo) (string, error) {
+	jsonData, err := marshalIndent(mods, "", "    ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal mod information: %w", err)
+	}
+	return string(jsonData), nil
+}
+
+// FormatResultsAsJsonFromMods formats a slice of ModInfo for display. For a single
+// mod it returns a single JSON object (backward compatible). For multiple mods it
+// returns a JSON array of objects.
+func FormatResultsAsJsonFromMods(mods []types.ModInfo) (string, error) {
+	if len(mods) == 0 {
+		return "[]", nil
+	}
+	if len(mods) == 1 {
+		return FormatResultsAsJson(mods[0])
+	}
 	jsonData, err := marshalIndent(mods, "", "    ")
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal mod information: %w", err)
@@ -111,7 +131,7 @@ func PrintPrettyJson(data string, useAltColors ...bool) error {
 		f.StringColor = color.New(color.FgHiMagenta)
 	}
 
-	s, err := f.Marshal(obj)
+	s, err := formatterMarshal(f, obj)
 	if err != nil {
 		return fmt.Errorf("failed to marshal formatted JSON: %w", err)
 	}
@@ -135,5 +155,25 @@ func StrToInt(input string) (int64, error) {
 		return 0, err
 	}
 
+	return result, nil
+}
+
+// StrToInt64Slice parses a comma-separated string of integers into a slice of int64.
+// Spaces around commas are allowed. Empty segments (e.g. "1,,2") or invalid tokens
+// cause an error. Returns an error if the resulting slice would be empty.
+func StrToInt64Slice(input string) ([]int64, error) {
+	parts := strings.Split(input, ",")
+	var result []int64
+	for _, p := range parts {
+		s := strings.TrimSpace(p)
+		if s == "" {
+			return nil, fmt.Errorf("empty mod id in list %q", input)
+		}
+		n, err := StrToInt(s)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, n)
+	}
 	return result, nil
 }

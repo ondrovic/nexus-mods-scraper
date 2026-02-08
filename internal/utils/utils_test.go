@@ -3,9 +3,11 @@ package utils
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
+// TestConcurrentFetch_FirstTaskFails verifies the first task's error is returned.
 func TestConcurrentFetch_FirstTaskFails(t *testing.T) {
 	// Arrange
 	expectedErr := errors.New("task1 failed")
@@ -21,6 +23,7 @@ func TestConcurrentFetch_FirstTaskFails(t *testing.T) {
 	}
 }
 
+// TestConcurrentFetch_SecondTaskFails verifies the second task's error is returned.
 func TestConcurrentFetch_SecondTaskFails(t *testing.T) {
 	// Arrange
 	expectedErr := errors.New("task2 failed")
@@ -36,6 +39,7 @@ func TestConcurrentFetch_SecondTaskFails(t *testing.T) {
 	}
 }
 
+// TestConcurrentFetch_MultipleTasksFail verifies one of the errors is returned.
 func TestConcurrentFetch_MultipleTasksFail(t *testing.T) {
 	// Arrange
 	task1Err := errors.New("task1 failed")
@@ -52,11 +56,10 @@ func TestConcurrentFetch_MultipleTasksFail(t *testing.T) {
 	}
 }
 
+// TestEnsureDirExists_DirAlreadyExists verifies no error when directory exists.
 func TestEnsureDirExists_DirAlreadyExists(t *testing.T) {
-	// Arrange
-	existingDir := "existingDir"
-	os.Mkdir(existingDir, os.ModePerm) // Create the directory for the test
-	defer os.Remove(existingDir)       // Clean up after test
+	// Arrange: t.TempDir() already exists and is cleaned up by the test framework
+	existingDir := t.TempDir()
 
 	// Act
 	err := EnsureDirExists(existingDir)
@@ -67,10 +70,10 @@ func TestEnsureDirExists_DirAlreadyExists(t *testing.T) {
 	}
 }
 
+// TestEnsureDirExists_DirDoesNotExist verifies directory is created when missing.
 func TestEnsureDirExists_DirDoesNotExist(t *testing.T) {
-	// Arrange
-	newDir := "newDir"
-	defer os.Remove(newDir) // Clean up after test
+	// Arrange: path under temp dir that does not exist yet; temp dir is cleaned up automatically
+	newDir := filepath.Join(t.TempDir(), "newDir")
 
 	// Act
 	err := EnsureDirExists(newDir)
@@ -87,6 +90,7 @@ func TestEnsureDirExists_DirDoesNotExist(t *testing.T) {
 	}
 }
 
+// TestEnsureDirExists_CannotCreateDir verifies error when directory cannot be created.
 func TestEnsureDirExists_CannotCreateDir(t *testing.T) {
 	// Arrange
 	invalidDir := "" // Empty directory name should cause an error

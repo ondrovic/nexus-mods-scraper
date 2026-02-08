@@ -19,18 +19,21 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
+// MockCookieStore is a test double for kooky.CookieStore used in extract tests.
 type MockCookieStore struct {
 	mock.Mock
 	mockCookies []*kooky.Cookie
 }
 
-// Implement http.CookieJar methods (since CookieStore embeds http.CookieJar)
+// SetCookies implements http.CookieJar for the mock; no-op for tests.
 func (m *MockCookieStore) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	// Needed for our tests, but you can implement if necessary
 }
 
+// Cookies returns nil for the mock jar; used to satisfy the interface.
 func (m *MockCookieStore) Cookies(u *url.URL) []*http.Cookie {
 	// Needed for our tests, but you can implement if necessary
 	return nil
@@ -136,6 +139,7 @@ func withExtractTestState(t *testing.T) (cleanup func()) {
 	}
 }
 
+// TestExtractCookies_Success verifies successful cookie extraction and save.
 func TestExtractCookies_Success(t *testing.T) {
 	// Arrange: Create a mock cookie store
 	mockStore := new(MockCookieStore)
@@ -188,9 +192,7 @@ func TestExtractCookies_Success(t *testing.T) {
 
 	// Verify the contents of the temp file
 	fileContent, err := os.ReadFile(tempFilePath)
-	if err != nil {
-		t.Fatalf("Failed to read temp file: %v", err)
-	}
+	require.NoError(t, err)
 
 	expectedContent := `{
     "session": "1234"
@@ -199,6 +201,7 @@ func TestExtractCookies_Success(t *testing.T) {
 	assert.JSONEq(t, expectedContent, string(fileContent), "The cookie data written to the file is not as expected")
 }
 
+// TestExtractCookies_ErrorInCookieExtractor checks that extractor errors are propagated.
 func TestExtractCookies_ErrorInCookieExtractor(t *testing.T) {
 	// Arrange: Create a mock cookie store
 	mockStore := new(MockCookieStore)
@@ -238,6 +241,7 @@ func TestExtractCookies_ErrorInCookieExtractor(t *testing.T) {
 	assert.Contains(t, err.Error(), "no installed browsers with browser profiles found")
 }
 
+// TestExtractCookies_NoCookieStores checks error when no cookie stores are available.
 func TestExtractCookies_NoCookieStores(t *testing.T) {
 	// Mock store provider that returns no stores
 	mockStoreProvider := func() []kooky.CookieStore {
@@ -263,6 +267,7 @@ func TestExtractCookies_NoCookieStores(t *testing.T) {
 	assert.Contains(t, err.Error(), "no cookie stores found")
 }
 
+// TestExtractCookies_SaveError checks that save failures are returned.
 func TestExtractCookies_SaveError(t *testing.T) {
 	// Arrange: Create a mock cookie store with valid cookies
 	mockStore := new(MockCookieStore)
@@ -306,6 +311,7 @@ func TestExtractCookies_SaveError(t *testing.T) {
 	assert.True(t, saveFailure, "expected save/write failure (permission or path not exist), got: %v", err)
 }
 
+// TestDisplayBrowserReport verifies the browser report output format.
 func TestDisplayBrowserReport(t *testing.T) {
 	result := &types.CookieExtractionResult{
 		BrowserStores: []types.BrowserCookieStore{
@@ -327,6 +333,7 @@ func TestDisplayBrowserReport(t *testing.T) {
 	displayBrowserReport(result, validCookies)
 }
 
+// TestDisplayBrowserReport_NoCookiesFound checks report when no cookies are found.
 func TestDisplayBrowserReport_NoCookiesFound(t *testing.T) {
 	result := &types.CookieExtractionResult{
 		BrowserStores: []types.BrowserCookieStore{
@@ -341,6 +348,7 @@ func TestDisplayBrowserReport_NoCookiesFound(t *testing.T) {
 	displayBrowserReport(result, validCookies)
 }
 
+// TestExtractCookies_WithValidationSuccess verifies validation success path and username output.
 func TestExtractCookies_WithValidationSuccess(t *testing.T) {
 	// Validation path: no-validate false, ValidateCookies succeeds
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -377,7 +385,7 @@ func TestExtractCookies_WithValidationSuccess(t *testing.T) {
 	mockStore.AssertExpectations(t)
 	path := filepath.Join(tempDir, "session-cookies.json")
 	content, err := os.ReadFile(path)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Contains(t, string(content), "1234")
 }
 
@@ -503,6 +511,7 @@ func TestExtractCookies_Interactive_ManualInputError(t *testing.T) {
 	assert.Equal(t, "manual input failed", err.Error())
 }
 
+// TestExtractCookies_ValidationFailure_NonInteractive checks that validation failure returns error when not interactive.
 func TestExtractCookies_ValidationFailure_NonInteractive(t *testing.T) {
 	// Validation fails (e.g. 401); non-interactive so we print warning and still try to save
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -540,6 +549,7 @@ func TestExtractCookies_ValidationFailure_NonInteractive(t *testing.T) {
 	mockStore.AssertExpectations(t)
 }
 
+// TestExtractCommand_ExecuteRunsExtractRunE ensures the extract command invokes ExtractCookies via RunE.
 func TestExtractCommand_ExecuteRunsExtractRunE(t *testing.T) {
 	// Run the real extract command so init() RunE (storeProvider + ExtractCookies) is covered.
 	// With no browser stores we get an error; with stores the command may succeed.
@@ -558,6 +568,7 @@ func TestExtractCommand_ExecuteRunsExtractRunE(t *testing.T) {
 	}
 }
 
+// TestExtractCookies_ValidationSuccess_NoUsername checks validation success when username is not present.
 func TestExtractCookies_ValidationSuccess_NoUsername(t *testing.T) {
 	// Validation succeeds but page has no username (empty username branch)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -595,10 +606,11 @@ func TestExtractCookies_ValidationSuccess_NoUsername(t *testing.T) {
 	mockStore.AssertExpectations(t)
 	path := filepath.Join(tempDir, "session-cookies.json")
 	content, err := os.ReadFile(path)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Contains(t, string(content), "abc")
 }
 
+// TestExtractCookies_Interactive_Manual verifies manual cookie entry in interactive mode.
 func TestExtractCookies_Interactive_Manual(t *testing.T) {
 	tempDir := t.TempDir()
 	defer withExtractTestState(t)()
@@ -626,10 +638,11 @@ func TestExtractCookies_Interactive_Manual(t *testing.T) {
 	assert.NoError(t, err)
 	path := filepath.Join(tempDir, "session-cookies.json")
 	content, err := os.ReadFile(path)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Contains(t, string(content), "manual-value")
 }
 
+// TestExtractCookies_Interactive_AutoSuccess verifies auto extraction success in interactive mode.
 func TestExtractCookies_Interactive_AutoSuccess(t *testing.T) {
 	mockStore := new(MockCookieStore)
 	cookie := &kooky.Cookie{
@@ -658,10 +671,11 @@ func TestExtractCookies_Interactive_AutoSuccess(t *testing.T) {
 
 	assert.NoError(t, err)
 	content, err := os.ReadFile(filepath.Join(tempDir, "session-cookies.json"))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Contains(t, string(content), "auto-value")
 }
 
+// TestExtractCookies_Interactive_AutoFailThenManual checks fallback to manual entry when auto fails.
 func TestExtractCookies_Interactive_AutoFailThenManual(t *testing.T) {
 	mockStoreProvider := func() []kooky.CookieStore { return []kooky.CookieStore{} }
 	tempDir := t.TempDir()
@@ -693,10 +707,11 @@ func TestExtractCookies_Interactive_AutoFailThenManual(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, confirmCalled)
 	content, err := os.ReadFile(filepath.Join(tempDir, "session-cookies.json"))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Contains(t, string(content), "fallback-value")
 }
 
+// TestExtractCookies_Interactive_AutoFailDeclineManual checks error when user declines manual after auto fail.
 func TestExtractCookies_Interactive_AutoFailDeclineManual(t *testing.T) {
 	mockStoreProvider := func() []kooky.CookieStore { return []kooky.CookieStore{} }
 	defer withExtractTestState(t)()
@@ -715,6 +730,7 @@ func TestExtractCookies_Interactive_AutoFailDeclineManual(t *testing.T) {
 	assert.Contains(t, err.Error(), "no cookie stores found")
 }
 
+// TestExtractCookies_Interactive_SelectMethodError checks error when method selection fails.
 func TestExtractCookies_Interactive_SelectMethodError(t *testing.T) {
 	defer withExtractTestState(t)()
 	viper.Set("interactive", true)

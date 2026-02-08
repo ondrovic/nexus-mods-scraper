@@ -8,6 +8,7 @@ import (
 	"go.szostok.io/version/extension"
 )
 
+// TestInit_VersionCommandAdded verifies the version subcommand is registered on root.
 func TestInit_VersionCommandAdded(t *testing.T) {
 	// Create a new RootCmd without initializing it
 	rootCmd := &cobra.Command{}

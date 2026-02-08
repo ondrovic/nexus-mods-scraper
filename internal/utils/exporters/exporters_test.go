@@ -18,20 +18,30 @@ type Mocker struct {
 	mock.Mock
 }
 
+// FormatResultsAsJson returns the mock's canned result for DisplayResults tests.
 func (m *Mocker) FormatResultsAsJson(results types.ModInfo) (string, error) {
 	args := m.Called(results)
 	return args.String(0), args.Error(1)
 }
 
+// FormatResultsAsJsonFromMods returns the mock's canned result for multi-mod display tests.
+func (m *Mocker) FormatResultsAsJsonFromMods(mods []types.ModInfo) (string, error) {
+	args := m.Called(mods)
+	return args.String(0), args.Error(1)
+}
+
+// PrintPrettyJson is a no-op for the mock.
 func (m *Mocker) PrintPrettyJson(jsonData string) {
 	m.Called(jsonData)
 }
 
+// EnsureDirExists returns the mock's canned error for save tests.
 func (m *Mocker) EnsureDirExists(dir string) error {
 	args := m.Called(dir)
 	return args.Error(0)
 }
 
+// TestDisplayResults_Success verifies DisplayResults with valid format output.
 func TestDisplayResults_Success(t *testing.T) {
 	// Arrange
 	mockFormatter := new(Mocker)
@@ -93,6 +103,7 @@ func TestDisplayResults_Success(t *testing.T) {
 	mockFormatter.AssertCalled(t, "FormatResultsAsJson", results.Mods)
 }
 
+// TestDisplayResults_FormatError checks DisplayResults when formatting fails.
 func TestDisplayResults_FormatError(t *testing.T) {
 	// Arrange: Create a mock formatter and set expectations for the error
 	mockFormatter := new(Mocker)
@@ -120,6 +131,7 @@ func TestDisplayResults_FormatError(t *testing.T) {
 	mockFormatter.AssertCalled(t, "FormatResultsAsJson", results.Mods)
 }
 
+// TestSaveCookiesToJson_Success verifies successful cookie JSON save.
 func TestSaveCookiesToJson_Success(t *testing.T) {
 	// Arrange
 	dir := "testDir"
@@ -158,6 +170,7 @@ func TestSaveCookiesToJson_Success(t *testing.T) {
 	assert.Equal(t, expectedContent, string(fileContent))
 }
 
+// TestSaveModInfoToJson_Success verifies successful mod info JSON save.
 func TestSaveModInfoToJson_Success(t *testing.T) {
 	// Arrange
 	tempDir, err := os.MkdirTemp("", "testDir")
@@ -196,6 +209,7 @@ func TestSaveModInfoToJson_Success(t *testing.T) {
 	assert.Equal(t, expectedContent, string(fileContent))
 }
 
+// TestSaveModInfoToJson_EnsureDirExistsError checks error when EnsureDirExists fails.
 func TestSaveModInfoToJson_EnsureDirExistsError(t *testing.T) {
 	// Arrange
 	dir := "testDir"
@@ -220,6 +234,7 @@ func TestSaveModInfoToJson_EnsureDirExistsError(t *testing.T) {
 	mockUtils.AssertCalled(t, "EnsureDirExists", dir)
 }
 
+// TestDisplayResults_QuietMode verifies DisplayResults in quiet mode (plain JSON).
 func TestDisplayResults_QuietMode(t *testing.T) {
 	// Arrange
 	sc := types.CliFlags{
@@ -243,6 +258,7 @@ func TestDisplayResults_QuietMode(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestSaveCookiesToJson_EnsureDirExistsError checks error when directory creation fails for cookies.
 func TestSaveCookiesToJson_EnsureDirExistsError(t *testing.T) {
 	// Arrange
 	dir := "testDir"
@@ -265,6 +281,7 @@ func TestSaveCookiesToJson_EnsureDirExistsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "directory error")
 }
 
+// TestSaveCookiesToJson_OpenFileError checks error when opening the cookie file fails.
 func TestSaveCookiesToJson_OpenFileError(t *testing.T) {
 	// Arrange
 	dir := "testDir"
@@ -288,6 +305,60 @@ func TestSaveCookiesToJson_OpenFileError(t *testing.T) {
 	assert.Contains(t, err.Error(), "open file error")
 }
 
+// TestDisplayResultsFromMods_SingleMod verifies DisplayResultsFromMods with one mod.
+func TestDisplayResultsFromMods_SingleMod(t *testing.T) {
+	mods := []types.ModInfo{
+		{Name: "Mod1", ModID: 1, Creator: "Creator1"},
+	}
+	mockFormatter := new(Mocker)
+	jsonData := `{"Name":"Mod1","ModID":1,"Creator":"Creator1"}`
+	mockFormatter.On("FormatResultsAsJsonFromMods", mods).Return(jsonData, nil)
+	mockFormatter.On("PrintPrettyJson", jsonData).Return()
+
+	err := DisplayResultsFromMods(types.CliFlags{}, mods, mockFormatter.FormatResultsAsJsonFromMods)
+	assert.NoError(t, err)
+	mockFormatter.AssertCalled(t, "FormatResultsAsJsonFromMods", mods)
+}
+
+// TestDisplayResultsFromMods_MultipleMods verifies DisplayResultsFromMods with multiple mods.
+func TestDisplayResultsFromMods_MultipleMods(t *testing.T) {
+	mods := []types.ModInfo{
+		{Name: "A", ModID: 1},
+		{Name: "B", ModID: 2},
+	}
+	mockFormatter := new(Mocker)
+	jsonData := `[{"Name":"A","ModID":1},{"Name":"B","ModID":2}]`
+	mockFormatter.On("FormatResultsAsJsonFromMods", mods).Return(jsonData, nil)
+	mockFormatter.On("PrintPrettyJson", jsonData).Return()
+
+	err := DisplayResultsFromMods(types.CliFlags{}, mods, mockFormatter.FormatResultsAsJsonFromMods)
+	assert.NoError(t, err)
+	mockFormatter.AssertCalled(t, "FormatResultsAsJsonFromMods", mods)
+}
+
+// TestDisplayResultsFromMods_QuietMode verifies DisplayResultsFromMods in quiet mode.
+func TestDisplayResultsFromMods_QuietMode(t *testing.T) {
+	sc := types.CliFlags{Quiet: true}
+	mods := []types.ModInfo{{Name: "Mod1", ModID: 1, Creator: "Creator1"}}
+	formatFunc := func(m []types.ModInfo) (string, error) {
+		return `[{"Name":"Mod1","ModID":1,"Creator":"Creator1"}]`, nil
+	}
+	err := DisplayResultsFromMods(sc, mods, formatFunc)
+	assert.NoError(t, err)
+}
+
+// TestDisplayResultsFromMods_FormatError checks DisplayResultsFromMods when formatting fails.
+func TestDisplayResultsFromMods_FormatError(t *testing.T) {
+	mods := []types.ModInfo{{Name: "Mod1", ModID: 1}}
+	mockFormatter := new(Mocker)
+	mockFormatter.On("FormatResultsAsJsonFromMods", mods).Return("", errors.New("format error"))
+
+	err := DisplayResultsFromMods(types.CliFlags{}, mods, mockFormatter.FormatResultsAsJsonFromMods)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "error while attempting to format results: format error")
+}
+
+// TestSaveModInfoToJson_WriteFileError checks error when writing the mod JSON file fails.
 func TestSaveModInfoToJson_WriteFileError(t *testing.T) {
 	// Arrange - use a directory that doesn't exist
 	dir := "/nonexistent/readonly/path"
@@ -308,4 +379,66 @@ func TestSaveModInfoToJson_WriteFileError(t *testing.T) {
 	// Assert
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "error saving file")
+}
+
+// TestSaveModInfoToJson_MarshalError checks error when JSON marshalling fails.
+func TestSaveModInfoToJson_MarshalError(t *testing.T) {
+	tempDir := t.TempDir()
+	mockUtils := new(Mocker)
+	mockUtils.On("EnsureDirExists", tempDir).Return(nil)
+
+	// Data that cannot be marshalled to JSON (channels are not supported)
+	badData := make(chan int)
+
+	_, err := SaveModInfoToJson(types.CliFlags{}, badData, tempDir, "modinfo", mockUtils.EnsureDirExists)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "error formatting data")
+	mockUtils.AssertCalled(t, "EnsureDirExists", tempDir)
+}
+
+// TestSaveCookiesToJson_MarshalError checks error when cookie JSON marshalling fails.
+func TestSaveCookiesToJson_MarshalError(t *testing.T) {
+	dir := t.TempDir()
+	mockUtils := new(Mocker)
+	mockUtils.On("EnsureDirExists", dir).Return(nil)
+
+	tempFile, err := os.CreateTemp("", "test")
+	assert.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	openFileFunc := func(name string, flag int, perm os.FileMode) (*os.File, error) {
+		return tempFile, nil
+	}
+
+	// Data that cannot be marshalled to JSON
+	badData := make(chan int)
+
+	err = SaveCookiesToJson(dir, "cookies.json", badData, openFileFunc, mockUtils.EnsureDirExists)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "json: unsupported type")
+	mockUtils.AssertCalled(t, "EnsureDirExists", dir)
+}
+
+// TestSaveCookiesToJson_WriteError checks error when writing the cookie file fails.
+func TestSaveCookiesToJson_WriteError(t *testing.T) {
+	dir := t.TempDir()
+	mockUtils := new(Mocker)
+	mockUtils.On("EnsureDirExists", dir).Return(nil)
+
+	// openFileFunc returns an already-closed temp file so SaveCookiesToJson's write fails.
+	// Expected error is "file already closed" (Go's error text). Using a temp regular file
+	// instead of a directory avoids Windows-specific behavior; adjust this fake opener if
+	// SaveCookiesToJson's file handling changes.
+	closedFile, err := os.CreateTemp(dir, "save-cookies-write-error")
+	assert.NoError(t, err)
+	closedFile.Close()
+	openFileFunc := func(name string, flag int, perm os.FileMode) (*os.File, error) {
+		return closedFile, nil
+	}
+
+	data := map[string]string{"session": "1234"}
+	err = SaveCookiesToJson(dir, "cookies.json", data, openFileFunc, mockUtils.EnsureDirExists)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "file already closed", "SaveCookiesToJson should report the write failure")
+	mockUtils.AssertCalled(t, "EnsureDirExists", dir)
 }
