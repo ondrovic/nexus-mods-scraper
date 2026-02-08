@@ -18,6 +18,7 @@ func TestExecuteMain_Success(t *testing.T) {
 	oldStderr := os.Stderr
 	r, w, err := os.Pipe()
 	assert.NoError(t, err)
+	defer r.Close()
 	os.Stderr = w
 
 	executeMain(mockExecute)
@@ -46,6 +47,7 @@ func TestExecuteMain_FailureOnExecute(t *testing.T) {
 	oldStderr := os.Stderr
 	r, w, err := os.Pipe()
 	assert.NoError(t, err)
+	defer r.Close()
 	os.Stderr = w
 	defer func() { os.Stderr = oldStderr }()
 

@@ -10,6 +10,9 @@ import (
 	"github.com/spf13/viper"
 )
 
+// clearTerminalScreen is the function used to clear the terminal; overridable in tests.
+var clearTerminalScreen = sCli.ClearTerminalScreen
+
 // RootCmd is the main Cobra command for the scraper CLI tool, providing a short
 // description and setting up the command's usage for scraping Nexus Mods and returning
 // the information in JSON format.
@@ -28,7 +31,7 @@ func init() {
 		if viper.GetBool("quiet") {
 			return nil
 		}
-		if err := sCli.ClearTerminalScreen(runtime.GOOS); err != nil {
+		if err := clearTerminalScreen(runtime.GOOS); err != nil {
 			return fmt.Errorf("error clearing terminal: %w", err)
 		}
 		return nil
