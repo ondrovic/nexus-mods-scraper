@@ -150,6 +150,49 @@ func TestFormatResultsAsJson_MarshalError(t *testing.T) {
 	}
 }
 
+func TestFormatResultsAsJsonFromMods(t *testing.T) {
+	single := types.ModInfo{Name: "Single", ModID: 1, LastChecked: time.Time{}}
+	multi := []types.ModInfo{
+		{Name: "A", ModID: 1},
+		{Name: "B", ModID: 2},
+	}
+
+	// single mod: same as FormatResultsAsJson (single object)
+	one, err := FormatResultsAsJsonFromMods([]types.ModInfo{single})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expectedSingle := `{
+    "LastChecked": "0001-01-01T00:00:00Z",
+    "ModID": 1,
+    "Name": "Single"
+}`
+	if one != expectedSingle {
+		t.Errorf("single: expected %q, got %q", expectedSingle, one)
+	}
+
+	// multiple mods: JSON array
+	arr, err := FormatResultsAsJsonFromMods(multi)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(arr, `"Name": "A"`) || !strings.Contains(arr, `"Name": "B"`) {
+		t.Errorf("multi: expected array with both mods, got %q", arr)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(arr), "[") {
+		t.Errorf("multi: expected JSON array, got %q", arr)
+	}
+
+	// empty: empty array
+	empty, err := FormatResultsAsJsonFromMods(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if empty != "[]" {
+		t.Errorf("empty: expected [] , got %q", empty)
+	}
+}
+
 // Test for PrintJson
 func TestPrintJson(t *testing.T) {
 	data := `{
@@ -244,6 +287,39 @@ func TestStrToInt(t *testing.T) {
 			}
 			if result != tt.expected {
 				t.Errorf("expected %d, got %d", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestStrToInt64Slice(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []int64
+		hasError bool
+	}{
+		{"single", "1", []int64{1}, false},
+		{"multi", "1,2,3", []int64{1, 2, 3}, false},
+		{"spaces", "1, 2 , 3", []int64{1, 2, 3}, false},
+		{"invalid token", "1,foo", nil, true},
+		{"empty segment", "1,,2", nil, true},
+		{"leading comma", ",1", nil, true},
+		{"trailing comma", "1,", nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := StrToInt64Slice(tt.input)
+			if (err != nil) != tt.hasError {
+				t.Errorf("expected error: %v, got: %v (err=%v)", tt.hasError, err != nil, err)
+			}
+			if !tt.hasError && len(result) != len(tt.expected) {
+				t.Errorf("expected len %d, got %d", len(tt.expected), len(result))
+			}
+			for i := range result {
+				if i < len(tt.expected) && result[i] != tt.expected[i] {
+					t.Errorf("at index %d: expected %d, got %d", i, tt.expected[i], result[i])
+				}
 			}
 		})
 	}

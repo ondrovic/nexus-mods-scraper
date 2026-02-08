@@ -23,6 +23,11 @@ func (m *Mocker) FormatResultsAsJson(results types.ModInfo) (string, error) {
 	return args.String(0), args.Error(1)
 }
 
+func (m *Mocker) FormatResultsAsJsonFromMods(mods []types.ModInfo) (string, error) {
+	args := m.Called(mods)
+	return args.String(0), args.Error(1)
+}
+
 func (m *Mocker) PrintPrettyJson(jsonData string) {
 	m.Called(jsonData)
 }
@@ -286,6 +291,45 @@ func TestSaveCookiesToJson_OpenFileError(t *testing.T) {
 	// Assert
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "open file error")
+}
+
+func TestDisplayResultsFromMods_SingleMod(t *testing.T) {
+	mods := []types.ModInfo{
+		{Name: "Mod1", ModID: 1, Creator: "Creator1"},
+	}
+	mockFormatter := new(Mocker)
+	jsonData := `{"Name":"Mod1","ModID":1,"Creator":"Creator1"}`
+	mockFormatter.On("FormatResultsAsJsonFromMods", mods).Return(jsonData, nil)
+	mockFormatter.On("PrintPrettyJson", jsonData).Return()
+
+	err := DisplayResultsFromMods(types.CliFlags{}, mods, mockFormatter.FormatResultsAsJsonFromMods)
+	assert.NoError(t, err)
+	mockFormatter.AssertCalled(t, "FormatResultsAsJsonFromMods", mods)
+}
+
+func TestDisplayResultsFromMods_MultipleMods(t *testing.T) {
+	mods := []types.ModInfo{
+		{Name: "A", ModID: 1},
+		{Name: "B", ModID: 2},
+	}
+	mockFormatter := new(Mocker)
+	jsonData := `[{"Name":"A","ModID":1},{"Name":"B","ModID":2}]`
+	mockFormatter.On("FormatResultsAsJsonFromMods", mods).Return(jsonData, nil)
+	mockFormatter.On("PrintPrettyJson", jsonData).Return()
+
+	err := DisplayResultsFromMods(types.CliFlags{}, mods, mockFormatter.FormatResultsAsJsonFromMods)
+	assert.NoError(t, err)
+	mockFormatter.AssertCalled(t, "FormatResultsAsJsonFromMods", mods)
+}
+
+func TestDisplayResultsFromMods_FormatError(t *testing.T) {
+	mods := []types.ModInfo{{Name: "Mod1", ModID: 1}}
+	mockFormatter := new(Mocker)
+	mockFormatter.On("FormatResultsAsJsonFromMods", mods).Return("", errors.New("format error"))
+
+	err := DisplayResultsFromMods(types.CliFlags{}, mods, mockFormatter.FormatResultsAsJsonFromMods)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "error while attempting to format results: format error")
 }
 
 func TestSaveModInfoToJson_WriteFileError(t *testing.T) {

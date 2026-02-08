@@ -20,7 +20,7 @@ func TestNewScraper(t *testing.T) {
 	assert.Equal(t, "", scraper.CookieFile)
 	assert.False(t, scraper.DisplayResults)
 	assert.Equal(t, "", scraper.GameName)
-	assert.Equal(t, int64(0), scraper.ModID)
+	assert.Nil(t, scraper.ModIDs)
 	assert.Equal(t, "", scraper.OutputDirectory)
 	assert.False(t, scraper.SaveResults)
 	assert.Empty(t, scraper.ValidCookies)

@@ -47,17 +47,17 @@ var (
 	// fetchDocumentFunc is a variable that holds a reference to the function used for
 	// fetching HTML documents from a given URL.
 	fetchDocumentFunc = fetchers.FetchDocument
-	// formatResultsFunc is used when displaying results; may be overridden in tests.
-	formatResultsFunc = formatters.FormatResultsAsJson
+	// formatResultsFromModsFunc is used when displaying results for one or more mods.
+	formatResultsFromModsFunc = formatters.FormatResultsAsJsonFromMods
 )
 
 // init initializes the scrape command with usage, description, and argument validation.
 // It binds flags using Viper and adds the command to the root command for execution.
 func init() {
 	scrapeCmd = &cobra.Command{
-		Use:   "scrape <game name> <mod id> [flags]",
+		Use:   "scrape <game name> <mod id or comma-separated mod ids> [flags]",
 		Short: "Scrape mod",
-		Long:  "Scrape mod for game and returns a JSON output",
+		Long:  "Scrape one or more mods for a game and return JSON output (comma-separated mod IDs supported)",
 		Args:  cobra.ExactArgs(2),
 		RunE:  run,
 	}
@@ -89,9 +89,12 @@ func run(cmd *cobra.Command, args []string) error {
 	if !options.DisplayResults && !options.SaveResults {
 		return fmt.Errorf("at least one of --display-results (-r) or --save-results (-s) must be enabled")
 	}
-	modID, err := formatters.StrToInt(args[1])
+	modIDs, err := formatters.StrToInt64Slice(args[1])
 	if err != nil {
 		return err
+	}
+	if len(modIDs) == 0 {
+		return fmt.Errorf("no mod IDs specified")
 	}
 
 	scraper := types.CliFlags{
@@ -100,7 +103,7 @@ func run(cmd *cobra.Command, args []string) error {
 		CookieFile:      viper.GetString("cookie-filename"),
 		DisplayResults:  viper.GetBool("display-results"),
 		GameName:        args[0],
-		ModID:           modID,
+		ModIDs:          modIDs,
 		Quiet:           viper.GetBool("quiet"),
 		SaveResults:     viper.GetBool("save-results"),
 		OutputDirectory: viper.GetString("output-directory"),
@@ -143,30 +146,43 @@ func scrapeMod(
 		}
 	}
 
-	// Scrape Mod Info
-	var results types.Results
-	var err error
+	// Scrape Mod Info (one fetch per mod ID)
+	var mods []types.ModInfo
+	var scrapeSpinnerMsg string
+	switch {
+	case len(sc.ModIDs) == 0:
+		scrapeSpinnerMsg = "No mods specified"
+	case len(sc.ModIDs) == 1:
+		scrapeSpinnerMsg = fmt.Sprintf("Scraping modID: %d for game: %s", sc.ModIDs[0], sc.GameName)
+	default:
+		scrapeSpinnerMsg = fmt.Sprintf("Scraping %d mods for game: %s", len(sc.ModIDs), sc.GameName)
+	}
 	if !sc.Quiet {
-		scrapeSpinner := createSpinner(fmt.Sprintf("Scraping modID: %d for game: %s", sc.ModID, sc.GameName), "✓", "Mod scraping complete", "✗", "Mod scraping failed")
+		scrapeSpinner := createSpinner(scrapeSpinnerMsg, "✓", "Mod scraping complete", "✗", "Mod scraping failed")
 		if err := scrapeSpinner.Start(); err != nil {
 			return fmt.Errorf("failed to start spinner: %w", err)
 		}
-
-		results, err = fetchModInfoFunc(sc.BaseUrl, sc.GameName, sc.ModID, utils.ConcurrentFetch, fetchDocumentFunc)
-		if err != nil {
-			scrapeSpinner.StopFailMessage(fmt.Sprintf("Error scraping mod: %v", err))
-			if stopErr := scrapeSpinner.StopFail(); stopErr != nil {
-				fmt.Fprintf(os.Stderr, "spinner stop error: %v\n", stopErr)
+		for _, id := range sc.ModIDs {
+			results, err := fetchModInfoFunc(sc.BaseUrl, sc.GameName, id, utils.ConcurrentFetch, fetchDocumentFunc)
+			if err != nil {
+				scrapeSpinner.StopFailMessage(fmt.Sprintf("Error scraping mod: %v", err))
+				if stopErr := scrapeSpinner.StopFail(); stopErr != nil {
+					fmt.Fprintf(os.Stderr, "spinner stop error: %v\n", stopErr)
+				}
+				return err
 			}
-			return err
+			mods = append(mods, results.Mods)
 		}
 		if stopErr := scrapeSpinner.Stop(); stopErr != nil {
 			fmt.Fprintf(os.Stderr, "spinner stop error: %v\n", stopErr)
 		}
 	} else {
-		results, err = fetchModInfoFunc(sc.BaseUrl, sc.GameName, sc.ModID, utils.ConcurrentFetch, fetchDocumentFunc)
-		if err != nil {
-			return err
+		for _, id := range sc.ModIDs {
+			results, err := fetchModInfoFunc(sc.BaseUrl, sc.GameName, id, utils.ConcurrentFetch, fetchDocumentFunc)
+			if err != nil {
+				return err
+			}
+			mods = append(mods, results.Mods)
 		}
 	}
 
@@ -177,7 +193,7 @@ func scrapeMod(
 			if err := displaySpinner.Start(); err != nil {
 				return fmt.Errorf("failed to start display spinner: %w", err)
 			}
-			if err := exporters.DisplayResults(sc, results, formatResultsFunc); err != nil {
+			if err := exporters.DisplayResultsFromMods(sc, mods, formatResultsFromModsFunc); err != nil {
 				fmt.Fprintln(os.Stderr, "Error displaying results:", err)
 				displaySpinner.StopFailMessage("Failed to display results")
 				if stopErr := displaySpinner.StopFail(); stopErr != nil {
@@ -189,42 +205,49 @@ func scrapeMod(
 				fmt.Fprintf(os.Stderr, "spinner stop error: %v\n", stopErr)
 			}
 		} else {
-			if err := exporters.DisplayResults(sc, results, formatResultsFunc); err != nil {
+			if err := exporters.DisplayResultsFromMods(sc, mods, formatResultsFromModsFunc); err != nil {
 				fmt.Fprintln(os.Stderr, "Error displaying results:", err)
 				return err
 			}
 		}
 	}
 
-	// Save Results
+	// Save Results (one file per mod)
 	if sc.SaveResults {
 		outputGameDirectory := filepath.Join(sc.OutputDirectory, strings.ToLower(sc.GameName))
 		if err := utils.EnsureDirExists(outputGameDirectory); err != nil {
 			return err
 		}
-
-		outputFilename := fmt.Sprintf("%s %d", strings.ToLower(results.Mods.Name), results.Mods.ModID)
 		if !sc.Quiet {
 			saveSpinner := createSpinner("Saving results", "✓", "Results saved successfully", "✗", "Failed to save results")
 			if err := saveSpinner.Start(); err != nil {
 				return fmt.Errorf("failed to start save spinner: %w", err)
 			}
-
-			if item, err := exporters.SaveModInfoToJson(sc, results, outputGameDirectory, outputFilename, utils.EnsureDirExists); err != nil {
-				saveSpinner.StopFailMessage(fmt.Sprintf("Error saving results: %v", err))
-				if stopErr := saveSpinner.StopFail(); stopErr != nil {
-					fmt.Fprintf(os.Stderr, "spinner stop error: %v\n", stopErr)
+			var lastSaved string
+			for _, mod := range mods {
+				outputFilename := fmt.Sprintf("%s %d", strings.ToLower(mod.Name), mod.ModID)
+				item, err := exporters.SaveModInfoToJson(sc, types.Results{Mods: mod}, outputGameDirectory, outputFilename, utils.EnsureDirExists)
+				if err != nil {
+					saveSpinner.StopFailMessage(fmt.Sprintf("Error saving results: %v", err))
+					if stopErr := saveSpinner.StopFail(); stopErr != nil {
+						fmt.Fprintf(os.Stderr, "spinner stop error: %v\n", stopErr)
+					}
+					return err
 				}
-				return err
-			} else {
-				saveSpinner.StopMessage(fmt.Sprintf("Saved successfully to %s", termlink.ColorLink(item, item, "green")))
+				lastSaved = item
+			}
+			if len(mods) > 0 {
+				saveSpinner.StopMessage(fmt.Sprintf("Saved successfully to %s", termlink.ColorLink(lastSaved, lastSaved, "green")))
 			}
 			if stopErr := saveSpinner.Stop(); stopErr != nil {
 				fmt.Fprintf(os.Stderr, "spinner stop error: %v\n", stopErr)
 			}
 		} else {
-			if _, err := exporters.SaveModInfoToJson(sc, results, outputGameDirectory, outputFilename, utils.EnsureDirExists); err != nil {
-				return err
+			for _, mod := range mods {
+				outputFilename := fmt.Sprintf("%s %d", strings.ToLower(mod.Name), mod.ModID)
+				if _, err := exporters.SaveModInfoToJson(sc, types.Results{Mods: mod}, outputGameDirectory, outputFilename, utils.EnsureDirExists); err != nil {
+					return err
+				}
 			}
 		}
 	}

@@ -105,16 +105,21 @@ This will:
 
 ### Scrape Command
 
-The `scrape` command fetches mod information and outputs JSON.
+The `scrape` command fetches mod information and outputs JSON. You can pass a single mod ID or a comma-separated list of mod IDs.
 
 ```bash
-./nexus-mods-scraper scrape <game-name> <mod-id> [flags]
+./nexus-mods-scraper scrape <game-name> <mod-id or comma-separated mod ids> [flags]
 ```
 
-#### Example
+#### Examples
 
 ```bash
+# Single mod
 ./nexus-mods-scraper scrape cyberpunk2077 26976
+
+# Multiple mods (comma-separated; spaces optional)
+./nexus-mods-scraper scrape cyberpunk2077 26976,123,456
+./nexus-mods-scraper scrape skyrimspecialedition 3863, 1234
 ```
 
 #### Flags
@@ -141,11 +146,19 @@ Use `--quiet` (or `-q`) to suppress spinners and status messages, making the out
 # Save to file
 ./nexus-mods-scraper scrape cyberpunk2077 26976 -q > mod-info.json
 
-# Extract specific fields
+# Extract specific fields (single mod)
 ./nexus-mods-scraper scrape skyrimspecialedition 3863 -q | jq '{name: .Name, version: .LatestVersion}'
+
+# Multiple mods: output is a JSON array; use jq '.[]' to iterate
+./nexus-mods-scraper scrape skyrimspecialedition 3863,1234 -q | jq '.[] | .Name'
 ```
 
-#### Output Example
+#### Output
+
+- **Single mod**: one JSON object (same as before).
+- **Multiple mods**: one JSON array of mod objects `[{...}, {...}]`.
+
+Example (single mod):
 
 ```json
 {
@@ -175,6 +188,8 @@ Use `--quiet` (or `-q`) to suppress spinners and status messages, making the out
   "VirusStatus": "Safe to use"
 }
 ```
+
+When saving with `--save-results`, one JSON file is written per mod in `<output-directory>/<game-name>/` (e.g. `mod name 26976.json`).
 
 ## Supported Browsers
 

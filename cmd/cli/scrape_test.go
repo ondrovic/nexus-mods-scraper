@@ -139,6 +139,15 @@ func TestRun_InvalidModID(t *testing.T) {
 	assert.True(t, viper.GetBool("display-results"))
 }
 
+func TestRun_InvalidModIDInList(t *testing.T) {
+	mockCmd := &cobra.Command{Use: "scrape", RunE: run}
+	initScrapeFlags(mockCmd)
+	mockCmd.SetArgs([]string{"game", "1,foo", "--display-results"})
+	err := mockCmd.Execute()
+	assert.Error(t, err)
+	assert.EqualError(t, err, "strconv.ParseInt: parsing \"foo\": invalid syntax")
+}
+
 // TestRun_Success covers the path in run() that builds CliFlags from viper and args
 // and calls scrapeMod (lines 85-98). It uses mocked fetch functions so no real I/O occurs.
 func TestRun_Success(t *testing.T) {
@@ -178,6 +187,51 @@ func TestRun_Success(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestRun_MultipleModIDs(t *testing.T) {
+	defer viper.Reset()
+	tempDir := t.TempDir()
+	cookieFile := filepath.Join(tempDir, "session-cookies.json")
+	require.NoError(t, os.WriteFile(cookieFile, []byte("{}"), 0644))
+	outputDir := filepath.Join(tempDir, "output")
+	require.NoError(t, os.Mkdir(outputDir, 0755))
+
+	viper.Set("base-url", "https://example.com")
+	viper.Set("cookie-directory", tempDir)
+	viper.Set("cookie-filename", "session-cookies.json")
+	viper.Set("display-results", false)
+	viper.Set("save-results", true)
+	viper.Set("quiet", true)
+	viper.Set("output-directory", outputDir)
+	viper.Set("valid-cookie-names", []string{"nexusmods_session", "nexusmods_session_refresh"})
+
+	origFetchModInfo := fetchModInfoFunc
+	origFetchDocument := fetchDocumentFunc
+	fetchModInfoFunc = mockFetchModInfoConcurrent
+	fetchDocumentFunc = mockFetchDocument
+	defer func() {
+		fetchModInfoFunc = origFetchModInfo
+		fetchDocumentFunc = origFetchDocument
+	}()
+
+	mockCmd := &cobra.Command{Use: "scrape", RunE: run}
+	initScrapeFlags(mockCmd)
+	mockCmd.SetArgs([]string{"some-game", "42,43", "--display-results=false", "--save-results"})
+
+	err := mockCmd.Execute()
+	assert.NoError(t, err)
+
+	gameDir := filepath.Join(outputDir, "some-game")
+	entries, err := os.ReadDir(gameDir)
+	require.NoError(t, err)
+	var jsonCount int
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+			jsonCount++
+		}
+	}
+	assert.Equal(t, 2, jsonCount, "expected 2 saved JSON files for 2 mod IDs")
+}
+
 func TestScrapeMod_WithMockedFunctions(t *testing.T) {
 	// Create a temporary directory for the test
 	tempDir := t.TempDir()
@@ -199,7 +253,7 @@ func TestScrapeMod_WithMockedFunctions(t *testing.T) {
 		CookieFile:      "session-cookies.json", // Just the filename, the directory is provided in CookieDirectory
 		DisplayResults:  true,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		SaveResults:     true,
 		OutputDirectory: tempOutputDir, // Use the temporary output directory
 	}
@@ -232,7 +286,7 @@ func TestScrapeMod_QuietMode(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  true,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           true, // Enable quiet mode
 		SaveResults:     true,
 		OutputDirectory: tempOutputDir,
@@ -261,7 +315,7 @@ func TestScrapeMod_DisplayOnly(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  true,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		SaveResults:     false,
 	}
 
@@ -293,7 +347,7 @@ func TestScrapeMod_FetchModInfoError_QuietMode(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  true,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           true,
 		SaveResults:     false,
 	}
@@ -326,7 +380,7 @@ func TestScrapeMod_FetchModInfoError_NonQuietMode(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  true,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           false,
 		SaveResults:     false,
 	}
@@ -359,7 +413,7 @@ func TestScrapeMod_SaveOnly_QuietMode(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  false,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           true,
 		SaveResults:     true,
 		OutputDirectory: tempOutputDir,
@@ -380,7 +434,7 @@ func TestScrapeMod_HTTPClientInitError_QuietMode(t *testing.T) {
 		CookieFile:      "nonexistent.json",
 		DisplayResults:  true,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           true,
 		SaveResults:     false,
 	}
@@ -400,7 +454,7 @@ func TestScrapeMod_HTTPClientInitError_NonQuietMode(t *testing.T) {
 		CookieFile:      "nonexistent.json",
 		DisplayResults:  true,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           false,
 		SaveResults:     false,
 	}
@@ -415,11 +469,11 @@ func TestScrapeMod_DisplayResults_FormatError(t *testing.T) {
 	cookieFile := filepath.Join(tempDir, "session-cookies.json")
 	require.NoError(t, os.WriteFile(cookieFile, []byte("{}"), 0644))
 
-	orig := formatResultsFunc
-	formatResultsFunc = func(types.ModInfo) (string, error) {
+	orig := formatResultsFromModsFunc
+	formatResultsFromModsFunc = func([]types.ModInfo) (string, error) {
 		return "", assert.AnError
 	}
-	defer func() { formatResultsFunc = orig }()
+	defer func() { formatResultsFromModsFunc = orig }()
 
 	sc := types.CliFlags{
 		BaseUrl: "https://somesite.com",
@@ -427,7 +481,7 @@ func TestScrapeMod_DisplayResults_FormatError(t *testing.T) {
 		CookieFile: "session-cookies.json",
 		DisplayResults: true,
 		GameName: "game",
-		ModID: 1234,
+		ModIDs: []int64{1234},
 		Quiet: false,
 		SaveResults: false,
 	}
@@ -458,7 +512,7 @@ func TestScrapeMod_SaveResults_SaveFails_NonQuiet(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  false,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           false,
 		SaveResults:     true,
 		OutputDirectory: outputDir,
@@ -481,7 +535,7 @@ func TestScrapeMod_SaveResults_EnsureDirExistsFails(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  false,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           true,
 		SaveResults:     true,
 		OutputDirectory: "/dev/null", // not a directory; EnsureDirExists will fail
@@ -544,7 +598,7 @@ func TestScrapeMod_SpinnerStartFails(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  false,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           false,
 		SaveResults:     false,
 	}
@@ -585,7 +639,7 @@ func TestScrapeMod_ScrapeSpinnerStartFails(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  false,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           false,
 		SaveResults:     false,
 	}
@@ -608,7 +662,7 @@ func TestScrapeMod_HTTPClientInitError_StopFailReturnsError(t *testing.T) {
 		CookieFile:      "nonexistent.json",
 		DisplayResults:  true,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           false,
 		SaveResults:     false,
 	}
@@ -633,7 +687,7 @@ func TestScrapeMod_HTTPClientInitSuccess_StopReturnsError(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  false,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           false,
 		SaveResults:     false,
 	}
@@ -669,7 +723,7 @@ func TestScrapeMod_FetchModInfoError_StopFailReturnsError(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  false,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           false,
 		SaveResults:     false,
 	}
@@ -701,7 +755,7 @@ func TestScrapeMod_ScrapeSuccess_StopReturnsError(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  false,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           false,
 		SaveResults:     false,
 	}
@@ -733,7 +787,7 @@ func TestScrapeMod_DisplaySpinnerStartFails(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  true,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           false,
 		SaveResults:     false,
 	}
@@ -747,9 +801,9 @@ func TestScrapeMod_DisplayResultsError_StopFailReturnsError(t *testing.T) {
 	tempDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
 
-	orig := formatResultsFunc
-	formatResultsFunc = func(types.ModInfo) (string, error) { return "", assert.AnError }
-	defer func() { formatResultsFunc = orig }()
+	orig := formatResultsFromModsFunc
+	formatResultsFromModsFunc = func([]types.ModInfo) (string, error) { return "", assert.AnError }
+	defer func() { formatResultsFromModsFunc = orig }()
 
 	call := 0
 	old := createSpinner
@@ -768,7 +822,7 @@ func TestScrapeMod_DisplayResultsError_StopFailReturnsError(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  true,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           false,
 		SaveResults:     false,
 	}
@@ -800,7 +854,7 @@ func TestScrapeMod_DisplaySuccess_StopReturnsError(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  true,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           false,
 		SaveResults:     false,
 	}
@@ -834,7 +888,7 @@ func TestScrapeMod_SaveSpinnerStartFails(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  true,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           false,
 		SaveResults:     true,
 		OutputDirectory: outputDir,
@@ -877,7 +931,7 @@ func TestScrapeMod_SaveError_StopFailReturnsError(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  false,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           false,
 		SaveResults:     true,
 		OutputDirectory: outputDir,
@@ -901,7 +955,7 @@ func TestScrapeMod_SaveSuccess_NonQuiet(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  false,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           false,
 		SaveResults:     true,
 		OutputDirectory: outputDir,
@@ -934,7 +988,7 @@ func TestScrapeMod_SaveSuccess_StopReturnsError(t *testing.T) {
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  false,
 		GameName:        "game",
-		ModID:           1234,
+		ModIDs:          []int64{1234},
 		Quiet:           false,
 		SaveResults:     true,
 		OutputDirectory: outputDir,
