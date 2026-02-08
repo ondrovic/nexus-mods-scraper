@@ -22,6 +22,9 @@ type Mocker struct {
 // Do implements the HTTPClient interface for the mock.
 func (m *Mocker) Do(req *http.Request) (*http.Response, error) {
 	args := m.Called(req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).(*http.Response), args.Error(1)
 }
 
@@ -33,12 +36,18 @@ func (m *Mocker) SetCookies(u *url.URL, cookies []*http.Cookie) {
 // Cookies returns the mock's canned cookies for the given URL.
 func (m *Mocker) Cookies(u *url.URL) []*http.Cookie {
 	args := m.Called(u)
+	if args.Get(0) == nil {
+		return nil
+	}
 	return args.Get(0).([]*http.Cookie)
 }
 
 // RoundTrip implements http.RoundTripper for the mock.
 func (m *Mocker) RoundTrip(req *http.Request) (*http.Response, error) {
 	args := m.Called(req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).(*http.Response), args.Error(1)
 }
 

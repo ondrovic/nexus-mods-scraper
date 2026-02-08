@@ -92,6 +92,7 @@ var (
 	createSpinner = func(start, stopCh, stopMsg, failCh, failMsg string) spinnerI {
 		return spinners.CreateSpinner(start, stopCh, stopMsg, failCh, failMsg)
 	}
+	strToInt64SliceFunc func(string) ([]int64, error) = formatters.StrToInt64Slice
 	// fetchModInfoFunc is a variable that holds a reference to the function used for
 	// concurrently fetching mod information.
 	fetchModInfoFunc = fetchers.FetchModInfoConcurrent
@@ -114,7 +115,9 @@ func init() {
 	}
 
 	initScrapeFlags(scrapeCmd)
-	viper.BindPFlags(scrapeCmd.Flags())
+	if err := viper.BindPFlags(scrapeCmd.Flags()); err != nil {
+		panic("scrape: bind flags: " + err.Error())
+	}
 	RootCmd.AddCommand(scrapeCmd)
 }
 
@@ -140,7 +143,7 @@ func run(cmd *cobra.Command, args []string) error {
 	if !options.DisplayResults && !options.SaveResults {
 		return fmt.Errorf("at least one of --display-results (-r) or --save-results (-s) must be enabled")
 	}
-	modIDs, err := formatters.StrToInt64Slice(args[1])
+	modIDs, err := strToInt64SliceFunc(args[1])
 	if err != nil {
 		return err
 	}

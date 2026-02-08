@@ -118,6 +118,7 @@ func TestSanitizeFilename(t *testing.T) {
 		{"empty after sanitize", "..:/\\", 42, "file_42"},
 		{"truncation at max length", strings.Repeat("a", 250), 99, strings.Repeat("a", maxFilenameLength)},
 		{"truncation then trim trailing space", strings.Repeat("x", 198) + "   ", 1, strings.Repeat("x", 198)},
+		{"long spaces only trim to empty fallback", strings.Repeat(" ", 200), 7, "file_7"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -197,6 +198,20 @@ func TestRun_EmptyModIDInList(t *testing.T) {
 	err := mockCmd.Execute()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "empty mod id in list")
+}
+
+// TestRun_EmptyModIDsDefensive checks the defensive branch when parser returns empty slice (line 149).
+func TestRun_EmptyModIDsDefensive(t *testing.T) {
+	orig := strToInt64SliceFunc
+	strToInt64SliceFunc = func(string) ([]int64, error) { return []int64{}, nil }
+	defer func() { strToInt64SliceFunc = orig }()
+
+	mockCmd := &cobra.Command{Use: "scrape", RunE: run}
+	initScrapeFlags(mockCmd)
+	mockCmd.SetArgs([]string{"game", "1", "--display-results"})
+	err := mockCmd.Execute()
+	assert.Error(t, err)
+	assert.EqualError(t, err, "no mod IDs specified")
 }
 
 // TestRun_Success covers the path in run() that builds CliFlags from viper and args
@@ -447,6 +462,34 @@ func TestScrapeMod_FetchModInfoError_NonQuietMode(t *testing.T) {
 
 	// Assert - should return the error
 	assert.Error(t, err)
+}
+
+// TestScrapeMod_SaveOneMod_NonQuiet_Success covers single-mod save path and StopMessage (line 292).
+func TestScrapeMod_SaveOneMod_NonQuiet_Success(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
+	outputDir := filepath.Join(tempDir, "output")
+	require.NoError(t, os.Mkdir(outputDir, 0755))
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  false,
+		GameName:        "game",
+		ModIDs:          []int64{1234},
+		Quiet:           false,
+		SaveResults:     true,
+		OutputDirectory: outputDir,
+	}
+
+	err := scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument)
+	assert.NoError(t, err)
+
+	gameDir := filepath.Join(outputDir, "game")
+	entries, err := os.ReadDir(gameDir)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(entries), 1)
 }
 
 // TestScrapeMod_SaveOnly_QuietMode verifies scrapeMod saves to file when save-results is set and quiet is true.
@@ -1118,6 +1161,41 @@ func TestScrapeMod_SaveSuccess_StopReturnsError(t *testing.T) {
 		CookieDirectory: tempDir,
 		CookieFile:      "session-cookies.json",
 		DisplayResults:  false,
+		GameName:        "game",
+		ModIDs:          []int64{1234},
+		Quiet:           false,
+		SaveResults:     true,
+		OutputDirectory: outputDir,
+	}
+	var err error
+	stderr := captureStderr(t, func() { err = scrapeMod(sc, mockFetchModInfoConcurrent, mockFetchDocument) })
+	assert.NoError(t, err)
+	assert.Contains(t, stderr, "spinner stop error")
+}
+
+// TestScrapeMod_SaveSuccess_StopReturnsError_WithDisplay covers saveSpinner.Stop() error (line 301) when display+save (4 spinners).
+func TestScrapeMod_SaveSuccess_StopReturnsError_WithDisplay(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "session-cookies.json"), []byte("{}"), 0644))
+	outputDir := filepath.Join(tempDir, "output")
+	require.NoError(t, os.Mkdir(outputDir, 0755))
+
+	call := 0
+	old := createSpinner
+	createSpinner = func(_, _, _, _, _ string) spinnerI {
+		call++
+		if call == 4 {
+			return mockSpinner{stopErr: errors.New("save stop")}
+		}
+		return mockSpinner{}
+	}
+	defer func() { createSpinner = old }()
+
+	sc := types.CliFlags{
+		BaseUrl:         "https://somesite.com",
+		CookieDirectory: tempDir,
+		CookieFile:      "session-cookies.json",
+		DisplayResults:  true,
 		GameName:        "game",
 		ModIDs:          []int64{1234},
 		Quiet:           false,

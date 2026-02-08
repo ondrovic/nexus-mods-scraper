@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // MockCookieStore is a test double for kooky.CookieStore used in extract tests.
@@ -191,9 +192,7 @@ func TestExtractCookies_Success(t *testing.T) {
 
 	// Verify the contents of the temp file
 	fileContent, err := os.ReadFile(tempFilePath)
-	if err != nil {
-		t.Fatalf("Failed to read temp file: %v", err)
-	}
+	require.NoError(t, err)
 
 	expectedContent := `{
     "session": "1234"
@@ -386,7 +385,7 @@ func TestExtractCookies_WithValidationSuccess(t *testing.T) {
 	mockStore.AssertExpectations(t)
 	path := filepath.Join(tempDir, "session-cookies.json")
 	content, err := os.ReadFile(path)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Contains(t, string(content), "1234")
 }
 
@@ -607,7 +606,7 @@ func TestExtractCookies_ValidationSuccess_NoUsername(t *testing.T) {
 	mockStore.AssertExpectations(t)
 	path := filepath.Join(tempDir, "session-cookies.json")
 	content, err := os.ReadFile(path)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Contains(t, string(content), "abc")
 }
 
@@ -639,7 +638,7 @@ func TestExtractCookies_Interactive_Manual(t *testing.T) {
 	assert.NoError(t, err)
 	path := filepath.Join(tempDir, "session-cookies.json")
 	content, err := os.ReadFile(path)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Contains(t, string(content), "manual-value")
 }
 
@@ -672,7 +671,7 @@ func TestExtractCookies_Interactive_AutoSuccess(t *testing.T) {
 
 	assert.NoError(t, err)
 	content, err := os.ReadFile(filepath.Join(tempDir, "session-cookies.json"))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Contains(t, string(content), "auto-value")
 }
 
@@ -708,7 +707,7 @@ func TestExtractCookies_Interactive_AutoFailThenManual(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, confirmCalled)
 	content, err := os.ReadFile(filepath.Join(tempDir, "session-cookies.json"))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Contains(t, string(content), "fallback-value")
 }
 

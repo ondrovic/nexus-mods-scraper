@@ -59,8 +59,10 @@ func TestConcurrentFetch_MultipleTasksFail(t *testing.T) {
 func TestEnsureDirExists_DirAlreadyExists(t *testing.T) {
 	// Arrange
 	existingDir := "existingDir"
-	os.Mkdir(existingDir, os.ModePerm) // Create the directory for the test
-	defer os.Remove(existingDir)       // Clean up after test
+	if err := os.Mkdir(existingDir, os.ModePerm); err != nil {
+		t.Fatalf("setup: create test dir: %v", err)
+	}
+	defer os.Remove(existingDir) // Clean up after test
 
 	// Act
 	err := EnsureDirExists(existingDir)
